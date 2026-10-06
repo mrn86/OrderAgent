@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any, Mapping, Protocol
 
+from app.core.audit.redact import redact_value
+
 logger = logging.getLogger("app.audit")
 
 
@@ -27,6 +29,6 @@ def get_audit_sink() -> AuditSink:
 
 def emit_record(record: Mapping[str, Any]) -> None:
     try:
-        get_audit_sink().write(record)
+        get_audit_sink().write(redact_value(dict(record)))
     except Exception:  # noqa: BLE001
         logger.warning("audit emit failed", exc_info=True)

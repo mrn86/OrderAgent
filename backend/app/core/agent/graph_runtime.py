@@ -133,6 +133,11 @@ def ensure_checkpointer() -> BaseCheckpointSaver:
 
 
 def thread_config(conversation_id: str) -> dict[str, Any]:
+    """只带 thread_id。不要在这里写 recursion_limit：
+
+    等于默认 25 的值在 merge_configs 里会被忽略；写成 80 又会覆盖
+    create_agent 绑定的 9999。中间件节点过多时，25 会在正常工具轮次上先炸。
+    """
     return {"configurable": {"thread_id": conversation_id}}
 
 

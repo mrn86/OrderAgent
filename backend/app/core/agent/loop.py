@@ -22,9 +22,11 @@ from typing import Any, AsyncIterator, Iterator, Optional
 from langchain.agents import create_agent
 from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from app.core.agent.compression import ContextCompressionMiddleware
+from app.core.agent.loop_guard import ToolLoopGuardMiddleware
 from app.core.agent.graph_runtime import (
     OrderAgentState,
     bind_runtime,
@@ -52,7 +54,6 @@ from app.core.agent.tools.permissions import (
     set_execution_context,
 )
 from app.core.audit import (
-    build_pii_middlewares,
     ensure_audit_request_id,
     get_trace_id,
     reset_agent_audit,
@@ -65,13 +66,12 @@ logger = logging.getLogger(__name__)
 
 
 def build_agent(ctx: ExecutionContext | None = None):
-    """创建带 checkpointer + PII + 上下文压缩 + HITL 的 Agent 图。"""
+    """创建带 checkpointer + 上下文压缩 + HITL 的 Agent 图。"""
     llm = build_llm()
     tools = get_agent_tools(ctx)
     prompt = get_enabled_prompt(PROMPT_KEY_AGENT_SYSTEM)
     interrupt_on = hitl_interrupt_on()
-    middleware = list(build_pii_middlewares())
-    middleware.append(ContextCompressionMiddleware())
+    middleware = [ContextCompressionMiddleware(), ToolLoopGuardMiddleware()]
     if interrupt_on:
         middleware.append(
             HumanInTheLoopMiddleware(
@@ -79,6 +79,8 @@ def build_agent(ctx: ExecutionContext | None = None):
                 description_prefix="高风险写操作待审批",
             )
         )
+    # create_agent 已绑定 recursion_limit=9999。这里再 with_config(80) 会覆盖它；
+    # invoke 若带上默认 25，图会在正常工具轮次上先炸。停机靠 ToolLoopGuard。
     return create_agent(
         model=llm,
         tools=tools,
@@ -283,11 +285,29 @@ def _attach_forced_human_cs(
     return answer, steps, human_cs
 
 
+def _public_exc_message(exc: BaseException) -> str:
+    if isinstance(exc, GraphRecursionError) or "Recursion limit of" in str(exc):
+        return "本轮推理步数过多已自动停止。请精简问题，或新开对话后再试。"
+    return str(exc).strip() or type(exc).__name__
+
+
 def _pending_approval_answer(summary: str) -> str:
     text = (summary or "").strip()
     if text:
         return f"{text}。请在下方确认是否批准执行。"
     return "该操作属于高风险写操作，请在下方确认是否批准执行。"
+
+
+def _pending_hitl(
+    cid: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None, str] | None:
+    """会话上若已有未审批 interrupt，禁止再塞新 Human（否则 tool_calls 无 Tool 回包）。"""
+    hitl = read_hitl_interrupt(cid)
+    if hitl is None:
+        return None
+    approval = _approval_from_hitl(hitl, cid)
+    answer = _pending_approval_answer((approval or {}).get("summary") or "")
+    return hitl, approval, answer
 
 
 def run_agent_loop(
@@ -316,6 +336,25 @@ def run_agent_loop(
         runtime_tokens = bind_runtime(agent, cid)
         token = set_execution_context(base_ctx)
 
+        blocked = _pending_hitl(cid)
+        if blocked is not None:
+            _hitl, approval, answer = blocked
+            touch_conversation(cid)
+            _safe_finish_audit(
+                audit_session, audit_token, status="approval_required", model_result=answer
+            )
+            audit_token = None
+            result = {
+                "query": user_query,
+                "answer": answer,
+                "steps": [],
+                "humanCs": None,
+                "conversationId": cid,
+            }
+            if approval:
+                result["approvalRequired"] = approval
+            return result
+
         out = agent.invoke(
             _turn_input(user_query),
             config=thread_config(cid),
@@ -338,7 +377,7 @@ def run_agent_loop(
                 audit_session, audit_token, status="approval_required", model_result=answer
             )
             audit_token = None
-            result: dict[str, Any] = {
+            result = {
                 "query": user_query,
                 "answer": answer,
                 "steps": [],
@@ -365,6 +404,17 @@ def run_agent_loop(
             "answer": answer,
             "steps": steps,
             "humanCs": human_cs,
+            "conversationId": cid,
+        }
+    except GraphRecursionError as exc:
+        msg = _public_exc_message(exc)
+        _safe_finish_audit(audit_session, audit_token, status="error", model_result=msg)
+        audit_token = None
+        return {
+            "query": user_query,
+            "answer": msg,
+            "steps": [],
+            "humanCs": None,
             "conversationId": cid,
         }
     except Exception:
@@ -413,6 +463,27 @@ async def stream_agent_loop(
         steps: list[dict[str, Any]] = []
         answer_parts: list[str] = []
         human_cs_emitted = False
+
+        blocked = _pending_hitl(cid)
+        if blocked is not None:
+            _hitl, approval, answer = blocked
+            audit_status = "approval_required"
+            audit_answer = answer
+            yield {"type": "reset_answer"}
+            yield {"type": "token", "content": answer}
+            if approval:
+                yield _approval_required_event(approval, cid)
+            touch_conversation(cid)
+            yield {
+                "type": "done",
+                "query": user_query,
+                "answer": answer,
+                "steps": steps,
+                "humanCs": None,
+                "conversationId": cid,
+                **({"approvalRequired": approval} if approval else {}),
+            }
+            return
 
         try:
             async for event in agent.astream_events(
@@ -556,7 +627,7 @@ async def stream_agent_loop(
                 }
                 return
             audit_status = "error"
-            msg = str(exc).strip() or f"{type(exc).__name__}"
+            msg = _public_exc_message(exc)
             audit_answer = msg
             yield {"type": "error", "message": msg}
     finally:

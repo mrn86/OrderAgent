@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     context_compress_max_tokens: int = 8000
     context_keep_recent_turns: int = 3
     context_tool_result_max_chars: int = 4000
+    # 仅作记录；真正上限由 create_agent 绑定的 9999，停机靠 ToolLoopGuard
+    agent_recursion_limit: int = 9999
+    # 同一用户轮内最多几轮 tool_calls；达到后去掉 tool_calls 并结束图
+    agent_max_tool_rounds: int = 5
 
 
 @lru_cache

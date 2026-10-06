@@ -3,17 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
+from app.core.audit.redact import redact_value
 from app.core.config import get_settings
-
-_EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
-_SENSITIVE_KEY = re.compile(
-    r"token|secret|password|authorization|api_?key|credential|cookie|session|private_?key|access_?key",
-    re.I,
-)
 
 
 def utc_now_iso() -> str:
@@ -30,30 +24,15 @@ def prompt_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def _redact_sensitive_keys(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        out: dict[str, Any] = {}
-        for key, item in value.items():
-            if _SENSITIVE_KEY.search(str(key)):
-                out[str(key)] = "***"
-            else:
-                out[str(key)] = _redact_sensitive_keys(item)
-        return out
-    if isinstance(value, list):
-        return [_redact_sensitive_keys(item) for item in value]
-    if isinstance(value, str):
-        return _EMAIL.sub("***@***", value)
-    return value
-
-
 def truncate_model_result(text: str | None) -> str | None:
     if text is None:
         return None
     settings = get_settings()
     max_chars = max(0, int(settings.audit_model_result_max_chars))
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "[truncated]"
+    redacted = redact_value(text)
+    if len(redacted) <= max_chars:
+        return redacted
+    return redacted[:max_chars] + "[truncated]"
 
 
 def build_agent_turn_record(session_data: Mapping[str, Any]) -> dict[str, Any]:
@@ -63,7 +42,7 @@ def build_agent_turn_record(session_data: Mapping[str, Any]) -> dict[str, Any]:
         tools.append(
             {
                 "name": item.get("name"),
-                "arguments": _redact_sensitive_keys(item.get("arguments") or {}),
+                "arguments": redact_value(item.get("arguments") or {}),
                 "ok": item.get("ok"),
                 "error_code": item.get("error_code"),
                 "model": item.get("model"),

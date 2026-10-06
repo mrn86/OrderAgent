@@ -1,6 +1,6 @@
 """发给模型的上下文压缩：只改本次 LLM 请求视图，不删 checkpoint 里的 messages。
 
-挂载：create_agent 中间件链 PII → 本模块 → HITL。
+挂载：create_agent 中间件链 本模块 → HITL。
 不在网关入口、不在 run_agent_loop 收尾、不在 after_agent 回写历史。
 
 时机（每次即将调用聊天模型，含同一用户轮内「工具返回后再调模型」）：
@@ -8,6 +8,7 @@
 - wrap_model_call：估窗；未超阈只给 system 追加槽 JSON；超阈则切最近 n 轮与 n 轮外。
   只规则压缩窗外，再对「窗外压缩结果 + n 轮」估窗；仍超则用摘要替换窗外再估；
   再超则截断或丢弃窗外。摘要替换窗外长段以减窗，不叠在 n 轮上。
+  发出前 sanitize_tool_pairs：补齐或剥离未配对 tool_calls，避免 DeepSeek 拒识。
 
 保留单位：用户轮，不是消息条数。一轮 = 一条 HumanMessage 起到下一条 Human 之前
 （含中间 AI / Tool）。默认最近 context_keep_recent_turns 轮原文进模型，不与窗外混装。
@@ -389,22 +390,84 @@ def _should_compress(
     return _overweight(messages, get_settings().context_tool_result_max_chars)
 
 
-def _unpaired_ai_indices(messages: Sequence[AnyMessage]) -> set[int]:
-    """未完成的 tool_calls（HITL 中断常见）：必须把对应 AI 一起留下。"""
-    pending: dict[str, int] = {}
-    unpaired: set[int] = set()
-    for idx, msg in enumerate(messages):
-        if isinstance(msg, AIMessage):
-            for call in getattr(msg, "tool_calls", None) or []:
-                cid = str(call.get("id") or "")
-                if cid:
-                    pending[cid] = idx
-                else:
-                    unpaired.add(idx)
-        elif isinstance(msg, ToolMessage):
-            pending.pop(str(getattr(msg, "tool_call_id", "") or ""), None)
-    unpaired.update(pending.values())
-    return unpaired
+def _call_id(call: Any) -> str:
+    if isinstance(call, dict):
+        return str(call.get("id") or "")
+    return str(getattr(call, "id", "") or "")
+
+
+def _call_name(call: Any) -> str:
+    if isinstance(call, dict):
+        return str(call.get("name") or "")
+    return str(getattr(call, "name", "") or "")
+
+
+_MISSING_TOOL_RESULT = "[tool_result_missing] 该次工具调用未完成或已从上下文省略。"
+
+
+def sanitize_tool_pairs(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
+    """发给模型前保证：有 tool_calls 的 AI 后面跟齐对应 ToolMessage。
+
+    只改本次请求视图。孤立 Tool 丢掉；历史中间缺观察则补占位；
+    末尾尚无任何 Tool 的 tool_calls 去掉（避免把未执行调用伪装成已完成）。
+    """
+    src = list(messages)
+    out: list[AnyMessage] = []
+    i = 0
+    n = len(src)
+    while i < n:
+        msg = src[i]
+        if isinstance(msg, ToolMessage):
+            i += 1
+            continue
+        if not isinstance(msg, AIMessage):
+            out.append(msg)
+            i += 1
+            continue
+        calls = list(getattr(msg, "tool_calls", None) or [])
+        if not calls:
+            out.append(msg)
+            i += 1
+            continue
+        needed = [(_call_id(c), _call_name(c)) for c in calls if _call_id(c)]
+        if not needed:
+            text = _text(msg.content).strip()
+            if text:
+                out.append(AIMessage(content=text))
+            j = i + 1
+            while j < n and isinstance(src[j], ToolMessage):
+                j += 1
+            i = j
+            continue
+        j = i + 1
+        found: dict[str, ToolMessage] = {}
+        while j < n and isinstance(src[j], ToolMessage):
+            tc = str(getattr(src[j], "tool_call_id", "") or "")
+            if tc and tc not in found:
+                found[tc] = src[j]
+            j += 1
+        missing = [(cid, name) for cid, name in needed if cid not in found]
+        trailing_unexecuted = j >= n and not found
+        if trailing_unexecuted:
+            text = _text(msg.content).strip()
+            if text:
+                out.append(AIMessage(content=text))
+            i = j
+            continue
+        out.append(msg)
+        for cid, _name in needed:
+            if cid in found:
+                out.append(found[cid])
+        for cid, name in missing:
+            out.append(
+                ToolMessage(
+                    content=_MISSING_TOOL_RESULT,
+                    tool_call_id=cid,
+                    name=name or None,
+                )
+            )
+        i = j
+    return out
 
 
 def _ensure_tool_pairs(messages: list[AnyMessage], src: Sequence[AnyMessage]) -> list[AnyMessage]:
@@ -415,7 +478,7 @@ def _ensure_tool_pairs(messages: list[AnyMessage], src: Sequence[AnyMessage]) ->
         if isinstance(msg, ToolMessage)
     }
     have_ai = {
-        str(call.get("id") or "")
+        _call_id(call)
         for msg in messages
         if isinstance(msg, AIMessage)
         for call in (getattr(msg, "tool_calls", None) or [])
@@ -428,7 +491,7 @@ def _ensure_tool_pairs(messages: list[AnyMessage], src: Sequence[AnyMessage]) ->
         if not isinstance(msg, AIMessage):
             continue
         calls = getattr(msg, "tool_calls", None) or []
-        if any(str(c.get("id") or "") in missing for c in calls):
+        if any(_call_id(c) in missing for c in calls):
             extra.append(msg)
     return extra + messages
 
@@ -497,7 +560,7 @@ def _force_from_dropped(
     dropped: Sequence[AnyMessage],
     kept: Sequence[AnyMessage],
 ) -> list[AnyMessage]:
-    """n 轮外的短事实：最后一次错误、WRITE 占位、未完成 tool 对。只进窗外压缩结果，不并入 kept。"""
+    """n 轮外的短事实：最后一次错误、WRITE 占位。只进窗外压缩结果，不并入 kept。"""
     if not dropped:
         return []
     # 对象身份：同一条消息若已在最近 K 轮里，后面不再塞一遍
@@ -505,17 +568,10 @@ def _force_from_dropped(
     extra: list[AnyMessage] = []
     last_error: ToolMessage | None = None
     last_write: ToolMessage | None = None
-    # 用 dropped+kept 一起算未完成 tool_calls（HITL 常见：AI 已发出调用、尚无 ToolMessage）。
-    # unpaired 下标相对「dropped 在前」的拼接列表，故下面只用 dropped 的 idx 判断即可。
-    unpaired = _unpaired_ai_indices(list(dropped) + list(kept))
     write_names = write_tool_names()
 
     dropped_list = list(dropped)
-    for idx, msg in enumerate(dropped_list):
-        # 未完成的 AI tool_calls：整条 AI 带回，否则 resume 后模型看不见待批参数
-        if isinstance(msg, AIMessage) and idx in unpaired:
-            extra.append(msg)
-            continue
+    for msg in dropped_list:
         if not isinstance(msg, ToolMessage):
             continue
         data = _parse_json(_text(msg.content))
@@ -706,32 +762,39 @@ class ContextCompressionMiddleware(AgentMiddleware[OrderAgentState]):
         tools = request.tools or None
         if not _should_compress(messages, request.system_message, tools=tools):
             if system is request.system_message:
-                return request
-            return request.override(system_message=system)
-
-        kept, outside = compress_messages(messages, memory=memory)
-        view = outside + kept
-        if not _over_budget(view, system, tools=tools):
-            return request.override(messages=view, system_message=system)
-
-        if outside:
-            summary = _try_summarize(request, outside)
-            if summary:
-                cand_system = system
-                parsed = _parse_json(summary)
-                if isinstance(parsed, dict):
-                    merged = _merge_summary_fields(memory, parsed)
-                    cand_system = inject_system(request.system_message, merged)
-                summary_view = [HumanMessage(content=_SUMMARY_PREFIX + summary)] + kept
-                if not _over_budget(summary_view, cand_system, tools=tools):
-                    return request.override(messages=summary_view, system_message=cand_system)
-
-        if outside:
-            trimmed = _aggressive_trim(outside)
-            trim_view = trimmed + kept
-            if not _over_budget(trim_view, system, tools=tools):
-                return request.override(messages=trim_view, system_message=system)
-        return request.override(messages=kept, system_message=system)
+                prepared = request
+            else:
+                prepared = request.override(system_message=system)
+        else:
+            kept, outside = compress_messages(messages, memory=memory)
+            view = outside + kept
+            prepared = None
+            if not _over_budget(view, system, tools=tools):
+                prepared = request.override(messages=view, system_message=system)
+            elif outside:
+                summary = _try_summarize(request, outside)
+                if summary:
+                    cand_system = system
+                    parsed = _parse_json(summary)
+                    if isinstance(parsed, dict):
+                        merged = _merge_summary_fields(memory, parsed)
+                        cand_system = inject_system(request.system_message, merged)
+                    summary_view = [HumanMessage(content=_SUMMARY_PREFIX + summary)] + kept
+                    if not _over_budget(summary_view, cand_system, tools=tools):
+                        prepared = request.override(
+                            messages=summary_view, system_message=cand_system
+                        )
+                if prepared is None:
+                    trimmed = _aggressive_trim(outside)
+                    trim_view = trimmed + kept
+                    if not _over_budget(trim_view, system, tools=tools):
+                        prepared = request.override(messages=trim_view, system_message=system)
+            if prepared is None:
+                prepared = request.override(messages=kept, system_message=system)
+        prepared = prepared.override(messages=sanitize_tool_pairs(list(prepared.messages or [])))
+        if _tool_rounds_this_turn(messages) >= get_settings().agent_max_tool_rounds:
+            prepared = _force_text_only(prepared)
+        return prepared
 
     def wrap_model_call(
         self,
@@ -748,6 +811,31 @@ class ContextCompressionMiddleware(AgentMiddleware[OrderAgentState]):
     ) -> ModelResponse:
         """异步路径（astream）：与 wrap_model_call 同一套 _prepare。"""
         return await handler(self._prepare(request))
+
+
+def _tool_rounds_this_turn(messages: Sequence[AnyMessage]) -> int:
+    """当前用户轮里，带 tool_calls 的 AI 条数。"""
+    n = 0
+    for msg in reversed(list(messages)):
+        if isinstance(msg, HumanMessage):
+            break
+        if isinstance(msg, AIMessage) and (getattr(msg, "tool_calls", None) or []):
+            n += 1
+    return n
+
+
+def _force_text_only(request: ModelRequest) -> ModelRequest:
+    """达到工具轮次上限：去掉 tools，避免模型空转撞 recursion_limit。"""
+    note = (
+        "【系统】本轮工具调用已达上限，请仅根据已有结果用中文 Markdown 给出最终答复，"
+        "禁止再调用任何工具。"
+    )
+    system = request.system_message
+    if system is None:
+        system = SystemMessage(content=note)
+    else:
+        system = SystemMessage(content=_text(system.content).rstrip() + "\n\n" + note)
+    return request.override(tools=[], system_message=system)
 
 
 def _aggressive_trim(messages: list[AnyMessage]) -> list[AnyMessage]:

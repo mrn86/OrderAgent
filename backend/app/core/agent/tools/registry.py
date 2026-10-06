@@ -228,6 +228,15 @@ class CreateInvoiceDownloadUrlsArgs(StrictArgs):
     types: str = Field(default="PDF,OFD", max_length=64)
     expire_seconds: int = Field(default=1800, ge=60, le=86400)
 
+    @field_validator("types", mode="before")
+    @classmethod
+    def coerce_types(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return ",".join(str(x).strip() for x in value if str(x).strip()) or "PDF,OFD"
+        if isinstance(value, str):
+            return value.strip() or "PDF,OFD"
+        return value
+
 
 class EscalateToHumanCsArgs(StrictArgs):
     """转人工：reason 写入前端 humanCs 载荷，供用户理解转接原因。"""
@@ -272,7 +281,7 @@ class CreateRefundArgs(StrictArgs):
 
 
 def _query_orders(args: QueryOrdersArgs) -> dict[str, Any]:
-    return order_service.list_orders(
+    raw = order_service.list_orders(
         order_no=args.order_no,
         order_id=args.order_id,
         status=args.status,
@@ -280,6 +289,35 @@ def _query_orders(args: QueryOrdersArgs) -> dict[str, Any]:
         page=args.page,
         page_size=args.page_size,
     )
+    return _slim_order_list_for_agent(raw)
+
+
+def _slim_order_list_for_agent(payload: dict[str, Any]) -> dict[str, Any]:
+    """列表给模型看短摘要，避免模型觉得还要逐笔 get_order_detail 而空转。"""
+    if not isinstance(payload, dict) or not isinstance(payload.get("list"), list):
+        return payload
+    slim_rows: list[dict[str, Any]] = []
+    for item in payload["list"]:
+        if not isinstance(item, dict):
+            slim_rows.append(item)
+            continue
+        items = item.get("items") or []
+        names = [i.get("spuName") for i in items if isinstance(i, dict) and i.get("spuName")]
+        slim_rows.append(
+            {
+                "orderId": item.get("orderId"),
+                "orderNo": item.get("orderNo"),
+                "status": item.get("status"),
+                "statusText": item.get("statusText"),
+                "createdAt": item.get("createdAt"),
+                "payAmount": item.get("payAmount"),
+                "itemCount": item.get("itemCount", len(items)),
+                "itemNames": names[:3],
+            }
+        )
+    out = dict(payload)
+    out["list"] = slim_rows
+    return out
 
 
 def _get_order_detail(args: GetOrderDetailArgs) -> dict[str, Any]:
@@ -339,11 +377,10 @@ def _list_invoices_by_order(args: OrderLookupArgs) -> dict[str, Any]:
 
 
 def _create_invoice_download_urls(args: CreateInvoiceDownloadUrlsArgs) -> dict[str, Any]:
-    # 将 "PDF,OFD" 拆成 service 需要的 types 列表
-    type_list = [t.strip() for t in (args.types or "PDF").split(",") if t.strip()]
+    type_list = [t.strip().upper() for t in (args.types or "PDF").split(",") if t.strip()]
     return invoice_service.create_download_urls(
         args.invoice_id,
-        types=type_list,
+        types=type_list or ["PDF"],
         expire_seconds=args.expire_seconds,
     )
 
@@ -381,6 +418,9 @@ TOOL_DEFINITIONS: list[ToolDefinition] = [
         name="query_orders",
         description=(
             "查询订单列表；过滤条件均可选，无订单号也可直接调用拉取当前用户订单。"
+            "用户说「查看全部订单/我的订单/订单列表」时调用一次即可，用返回的 list 直接作答，"
+            "禁止再对每一笔调用详情/物流工具，除非用户明确要某一笔的明细。"
+            "同一查询条件成功返回后不要重复调用。"
             "用户说「给我退款/我的订单退款/帮我退款」等且未给订单号时，必须先调用本工具定位订单，"
             "禁止一上来只追问订单号。"
             "仅 1 笔：用其 order_no/order_id 继续后续操作；多笔：列出摘要请用户选择。"
@@ -480,21 +520,31 @@ TOOL_DEFINITIONS: list[ToolDefinition] = [
     # ---- 发票（invoice:read / invoice:download）----
     ToolDefinition(
         name="get_invoice",
-        description="查看发票详情。",
+        description=(
+            "按发票 ID 查看发票详情。用户已给出 INV 开头的发票 ID 时必须用本工具，"
+            "不要用 list_invoices_by_order，也不要把发票 ID 当成订单号。"
+        ),
         parameters_model=GetInvoiceArgs,
         policy=INVOICE_READ_POLICY,
         handler=_get_invoice,  # type: ignore[arg-type]
     ),
     ToolDefinition(
         name="list_invoices_by_order",
-        description="按订单查询发票列表。",
+        description=(
+            "仅在用户给的是订单号/订单 ID、还没有发票 ID 时，按订单查发票列表。"
+            "参数只能是 order_no 或 order_id；禁止传入发票 ID（INV…）。"
+        ),
         parameters_model=OrderLookupArgs,
         policy=INVOICE_READ_POLICY,
         handler=_list_invoices_by_order,  # type: ignore[arg-type]
     ),
     ToolDefinition(
         name="create_invoice_download_urls",
-        description="获取发票下载链接。types 用逗号分隔，如 PDF,OFD。",
+        description=(
+            "按发票 ID 生成下载链接。已有 INV 开头的发票 ID 时直接调用，不必先列表。"
+            "types 为 PDF/OFD/XML，逗号分隔，大小写均可；未指定用 PDF,OFD。"
+            "一次成功后立即把链接交给用户，禁止重复调用本工具。"
+        ),
         parameters_model=CreateInvoiceDownloadUrlsArgs,
         policy=DOWNLOAD_POLICY,
         handler=_create_invoice_download_urls,  # type: ignore[arg-type]

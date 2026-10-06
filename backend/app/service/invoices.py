@@ -121,7 +121,9 @@ def create_download_urls(
     if item["status"] not in {"ISSUED", "PUSHED"}:
         return {"error": {"code": 50005, "message": "发票尚未开具，无法下载"}}
 
-    wanted = types or ["PDF"]
+    wanted = [str(t).strip().upper() for t in (types or ["PDF"]) if str(t).strip()]
+    if not wanted:
+        wanted = ["PDF"]
     supported = {"PDF", "OFD", "XML"}
     if any(t not in supported for t in wanted):
         return {"error": {"code": 50009, "message": "请求的文件类型不支持"}}

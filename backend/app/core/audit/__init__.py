@@ -1,7 +1,7 @@
 """审计工具：网关与 Agent 轮次 JSON 审计。"""
 
 from app.core.audit.gateway import emit_gateway_audit
-from app.core.audit.pii_middleware import build_pii_middlewares
+from app.core.audit.redact import redact_text, redact_value
 from app.core.audit.request_id import (
     ensure_audit_request_id,
     get_audit_request_id,
@@ -18,8 +18,9 @@ from app.core.audit.session import (
 
 __all__ = [
     "AgentAuditSession",
-    "build_pii_middlewares",
     "emit_gateway_audit",
+    "redact_text",
+    "redact_value",
     "ensure_audit_request_id",
     "get_agent_audit_session",
     "get_audit_request_id",

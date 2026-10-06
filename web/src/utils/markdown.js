@@ -1,5 +1,7 @@
 import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import purify from 'dompurify'
+
+const DOMPurify = purify?.sanitize ? purify : purify?.default || purify
 
 marked.setOptions({
   gfm: true,
@@ -16,9 +18,17 @@ marked.use({
   },
 })
 
+function unwrapFence(text) {
+  const raw = String(text).trim()
+  const m = raw.match(/^```(?:markdown|md)?\s*\r?\n([\s\S]*?)\r?\n```\s*$/i)
+  return m ? m[1] : String(text)
+}
+
 export function renderMarkdown(text) {
   if (!text) return ''
-  const html = marked.parse(String(text), { async: false })
+  let html = marked.parse(unwrapFence(text), { async: false })
+  if (typeof html !== 'string') html = String(html ?? '')
+  if (typeof DOMPurify?.sanitize !== 'function') return html
   return DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
     ADD_ATTR: ['target', 'rel'],
