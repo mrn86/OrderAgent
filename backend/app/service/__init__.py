@@ -1,0 +1,1 @@
+"""Service layer: business logic over fake data / DB."""
