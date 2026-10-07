@@ -23,18 +23,25 @@ from app.core.agent.tools.permissions import (
     build_default_context,
     get_execution_context,
 )
-from app.core.agent.tools.registry import TOOL_DEFINITIONS
-
 # 转人工本身是高风险写，但不应再套一层 HITL 审批卡
 _HITL_EXCLUDE = frozenset({"escalate_to_human_cs", "submit_expert_report"})
+# 本进程独占工具。未安装时没有业务工具。
+_PROCESS_TOOLS: list[ToolDefinition] | None = None
+
+
+def install_process_tools(definitions: list[ToolDefinition]) -> None:
+    """本进程只使用这份工具列表。"""
+    global _PROCESS_TOOLS
+    _PROCESS_TOOLS = list(definitions)
+    from app.core.context.compression import reset_write_tool_names
+
+    reset_write_tool_names()
 
 
 def all_tool_definitions() -> list:
-    # 延后导入：dispatch/report 会引用 profiles，而 profiles 初始化时会先进入本包。
-    from app.core.agent.tools.dispatch_tools import DISPATCH_DEFINITIONS
-    from app.core.agent.tools.report import SUBMIT_REPORT_DEFINITION
-
-    return [*TOOL_DEFINITIONS, *DISPATCH_DEFINITIONS, SUBMIT_REPORT_DEFINITION]
+    if _PROCESS_TOOLS is None:
+        return []
+    return list(_PROCESS_TOOLS)
 
 
 def resolve_execution_context(ctx: ExecutionContext | None = None) -> ExecutionContext:
@@ -73,16 +80,6 @@ def get_agent_tools(ctx: ExecutionContext | None = None) -> list[StructuredTool]
     resolved = resolve_execution_context(ctx)
     return [
         _to_langchain_tool(item)
-        for item in all_tool_definitions()
-        if is_tool_allowed(item, resolved)
-    ]
-
-
-def list_tool_schemas(ctx: ExecutionContext | None = None) -> list[dict[str, Any]]:
-    """导出当前上下文下模型可见的工具 Schema。"""
-    resolved = resolve_execution_context(ctx)
-    return [
-        item.to_model_tool()
         for item in all_tool_definitions()
         if is_tool_allowed(item, resolved)
     ]

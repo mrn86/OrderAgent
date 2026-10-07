@@ -1,11 +1,11 @@
 """工具权限与执行上下文。
 
 职责：
-- 声明业务权限码与执行模式
-- ExecutionContext：服务端可信身份/白名单/权限（模型不可伪造）
+- 执行模式与 ExecutionContext（服务端可信身份/白名单/权限，模型不可伪造）
 - PermissionEngine：白名单 + RBAC 硬边界
 - contextvars：Agent 一轮对话内传播当前上下文
 
+业务权限码由各 Agent 进程自行定义，不在此集中声明。
 高风险人工审批改由 LangGraph HumanInTheLoopMiddleware + checkpointer 承担。
 """
 
@@ -16,33 +16,6 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
-
-
-# ---------------------------------------------------------------------------
-# 业务权限码（ToolPolicy.permission 与 ExecutionContext.permissions 共用）
-# ---------------------------------------------------------------------------
-
-PERM_ORDER_READ = "order:read"
-PERM_LOGISTICS_READ = "logistics:read"
-PERM_AFTER_SALE_READ = "after_sale:read"
-PERM_REFUND_READ = "refund:read"
-PERM_REFUND_CREATE = "refund:create"
-PERM_INVOICE_READ = "invoice:read"
-PERM_INVOICE_DOWNLOAD = "invoice:download"
-PERM_CS_ESCALATE = "cs:escalate"
-
-ALL_AGENT_PERMISSIONS: frozenset[str] = frozenset(
-    {
-        PERM_ORDER_READ,
-        PERM_LOGISTICS_READ,
-        PERM_AFTER_SALE_READ,
-        PERM_REFUND_READ,
-        PERM_REFUND_CREATE,
-        PERM_INVOICE_READ,
-        PERM_INVOICE_DOWNLOAD,
-        PERM_CS_ESCALATE,
-    }
-)
 
 
 class PermissionDecision(StrEnum):
@@ -137,12 +110,12 @@ def build_default_context(
     mode: PermissionMode = PermissionMode.DEFAULT,
     conversation_id: str = "",
 ) -> ExecutionContext:
-    """构造 Agent 默认执行上下文（全量业务权限 + 工具白名单）。"""
+    """构造 Agent 默认执行上下文（权限与工具白名单由进程安装）。"""
     return ExecutionContext(
         trace_id=trace_id or f"trace_{uuid.uuid4().hex[:12]}",
         user_id=user_id,
         tenant_id=tenant_id,
-        permissions=permissions if permissions is not None else ALL_AGENT_PERMISSIONS,
+        permissions=permissions if permissions is not None else frozenset(),
         allowed_tools=allowed_tools,
         mode=mode,
         conversation_id=conversation_id,

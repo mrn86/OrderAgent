@@ -7,7 +7,6 @@ from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
 
-from app.core.agent.profiles import SUBMIT_REPORT
 from app.core.agent.protocol import CommandRecord, EvidenceItem, ExpertReport, PathStep, ReportStatus
 from app.core.agent.tools.governance import (
     Effect,
@@ -17,7 +16,8 @@ from app.core.agent.tools.governance import (
     ToolDefinition,
     ToolPolicy,
 )
-from app.core.agent.tools.permissions import PERM_CS_ESCALATE
+
+SUBMIT_REPORT = "submit_expert_report"
 
 _last_report: ContextVar[ExpertReport | None] = ContextVar("expert_report", default=None)
 
@@ -111,18 +111,20 @@ def _submit(args: SubmitExpertReportArgs) -> dict[str, Any]:
     ).model_dump(mode="json")
 
 
-SUBMIT_REPORT_DEFINITION = ToolDefinition(
-    name=SUBMIT_REPORT,
-    description="结束前必须调用一次，提交结构化专家报告。",
-    parameters_model=SubmitExpertReportArgs,
-    result_model=SubmitExpertReportResult,
-    policy=ToolPolicy(
-        effect=Effect.READ,
-        risk=Risk.LOW,
-        permission=PERM_CS_ESCALATE,
-        timeout_seconds=3.0,
-        max_retries=0,
-        idempotent=True,
-    ),
-    handler=_submit,  # type: ignore[arg-type]
-)
+def build_submit_report_definition(permission: str) -> ToolDefinition:
+    """由各专家进程用本域权限码构造 submit_expert_report。"""
+    return ToolDefinition(
+        name=SUBMIT_REPORT,
+        description="结束前必须调用一次，提交结构化专家报告。",
+        parameters_model=SubmitExpertReportArgs,
+        result_model=SubmitExpertReportResult,
+        policy=ToolPolicy(
+            effect=Effect.READ,
+            risk=Risk.LOW,
+            permission=permission,
+            timeout_seconds=3.0,
+            max_retries=0,
+            idempotent=True,
+        ),
+        handler=_submit,  # type: ignore[arg-type]
+    )

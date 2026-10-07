@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
+from pathlib import Path
+
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.core.agent.loop_guard import (
@@ -7,7 +11,20 @@ from app.core.agent.loop_guard import (
     strip_tool_calls_from_response,
     tool_call_fingerprint,
 )
-from app.core.agent.tools.registry import _slim_order_list_for_agent
+
+_ORDER_APP = Path(__file__).resolve().parents[2] / "apps" / "order-expert"
+sys.path = [p for p in sys.path if "apps" not in Path(p).as_posix()]
+sys.path.insert(0, str(_ORDER_APP))
+for _name in list(sys.modules):
+    if _name == "access" or _name.startswith("access."):
+        del sys.modules[_name]
+_ORDER_TOOLS = _ORDER_APP / "tools" / "definitions.py"
+_spec = importlib.util.spec_from_file_location("order_tool_definitions", _ORDER_TOOLS)
+assert _spec is not None and _spec.loader is not None
+_order_tools = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _order_tools
+_spec.loader.exec_module(_order_tools)
+_slim_order_list_for_agent = _order_tools.slim_order_list_for_agent
 
 
 def test_fingerprint_stable():

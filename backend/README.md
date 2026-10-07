@@ -2,12 +2,12 @@
 
 LangChain 多 Agent：路由 + 订单/物流/发票专家，共享本目录 `app` 包。
 
-- 路由：`AGENT_ROLE=router` → `app.main:app`（用户 API / SSE）
-- 订单专家：`AGENT_ROLE=order` → `app.expert_app:app`
-- 物流专家：`AGENT_ROLE=logistics` → `app.expert_app:app`
-- 发票专家：`AGENT_ROLE=invoice` → `app.expert_app:app`
+- 路由：`apps/router-agent` → `uvicorn main:app`（派发工具在该进程内创建）
+- 订单专家：`apps/order-expert` → `uvicorn main:app`（订单工具在该进程内创建）
+- 物流专家：`apps/logistics-expert` → `uvicorn main:app`（物流工具在该进程内创建）
+- 发票专家：`apps/invoice-expert` → `uvicorn main:app`（发票工具在该进程内创建）
 
-进程间派发走 A2A（`a2a-sdk` JSON-RPC + AgentCard）；HITL 经专家 `POST /v1/a2a/resume`。
+进程间派发走 A2A（各 app 自己的 Client/Server）；HITL 经专家 `POST /v1/a2a/resume`。
 Redis 仅保留 SSE / 任务 meta / conversation↔task HITL 映射。
 
 
@@ -20,7 +20,7 @@ Redis 仅保留 SSE / 任务 meta / conversation↔task HITL 映射。
 配套前端：`../web`（Vue3）。
 
 > 默认 `USE_FAKE_DATA=true`，业务查询可不依赖真实库。  
-> **系统提示词**由网关 `app/gateway/prompts` 管理，存 PostgreSQL 表 `system_prompts`（启动时自动建表/种子）；库不可用时回退内存。  
+> **系统提示词**默认内容在各 `apps/*/prompts`；存储层仍为 `app/gateway/prompts`（PostgreSQL `system_prompts`，库不可用时回退内存）。各进程启动时只种子自己的 key。  
 > 若本机尚无库：`python scripts/create_db.py`
 
 ## 1. 安装
@@ -38,7 +38,8 @@ pip install -r requirements.txt
 ## 2. 启动 API
 
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+cd ../apps/router-agent
+uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 健康检查：

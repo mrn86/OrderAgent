@@ -34,7 +34,7 @@ from langchain_core.messages.utils import count_tokens_approximately
 
 from app.core.agent.graph_runtime import OrderAgentState, read_hitl_interrupt
 from app.core.agent.tools.governance import Effect
-from app.core.agent.tools.registry import TOOL_DEFINITIONS, slim_invoice_for_agent
+from app.core.agent.tools.registry import slim_invoice_for_agent
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -59,12 +59,20 @@ _SUMMARY_PROMPT = """从下列被裁掉的旧对话中摘抄要点。只输出 J
 _WRITE_TOOLS: frozenset[str] | None = None
 
 
+def reset_write_tool_names() -> None:
+    """进程安装自己的工具后清空缓存。"""
+    global _WRITE_TOOLS
+    _WRITE_TOOLS = None
+
+
 def write_tool_names() -> frozenset[str]:
-    """WRITE 工具名集合（认 ToolPolicy.effect，不认具体业务名）。"""
+    """WRITE 工具名集合（认当前进程工具的 ToolPolicy.effect）。"""
     global _WRITE_TOOLS
     if _WRITE_TOOLS is None:
+        from app.core.agent.tools import all_tool_definitions
+
         _WRITE_TOOLS = frozenset(
-            item.name for item in TOOL_DEFINITIONS if item.policy.effect is Effect.WRITE
+            item.name for item in all_tool_definitions() if item.policy.effect is Effect.WRITE
         )
     return _WRITE_TOOLS
 

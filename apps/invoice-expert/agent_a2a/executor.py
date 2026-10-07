@@ -1,4 +1,4 @@
-"""A2A AgentExecutor：将 DispatchEnvelope 交给专家任务执行器。"""
+"""A2A AgentExecutor：将 DispatchEnvelope 交给本专家任务执行器。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ def _envelope_from_context(context: RequestContext) -> DispatchEnvelope:
             if isinstance(item, dict) and (
                 "instruction" in item or "task_id" in item or "taskId" in item
             ):
-                # protobuf MessageToDict 可能把 snake_case 转成 camelCase
                 normalized = {
                     "task_id": item.get("task_id") or item.get("taskId") or context.task_id,
                     "trace_id": item.get("trace_id")
@@ -38,7 +37,7 @@ def _envelope_from_context(context: RequestContext) -> DispatchEnvelope:
                     "user_id": item.get("user_id") or item.get("userId") or "anonymous",
                     "expert": item.get("expert")
                     or current_profile().expert_name
-                    or "order",
+                    or current_profile().role,
                     "mode": item.get("mode") or "execute",
                     "reason": item.get("reason") or "a2a_dispatch",
                     "input_summary": item.get("input_summary") or item.get("inputSummary") or "",
@@ -49,7 +48,8 @@ def _envelope_from_context(context: RequestContext) -> DispatchEnvelope:
                 }
                 return DispatchEnvelope.model_validate(normalized)
     text = context.get_user_input()
-    expert = current_profile().expert_name or "order"
+    profile = current_profile()
+    expert = profile.expert_name or profile.role
     return DispatchEnvelope(
         task_id=context.task_id or "",
         trace_id=f"trace_{(context.task_id or 'a2a')[:12]}",

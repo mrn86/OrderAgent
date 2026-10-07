@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
-from app.core.agent.a2a.client import resume_via_http, send_dispatch
 from app.core.agent.bus import (
     clear_pending_hitl,
     get_pending_hitl,
@@ -22,6 +22,32 @@ from app.core.audit import get_audit_request_id, get_trace_id
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_send_impl: Callable[[DispatchEnvelope], dict[str, Any]] | None = None
+_resume_impl: Callable[[str, str, str], dict[str, Any]] | None = None
+
+
+def bind_a2a_client(
+    *,
+    send: Callable[[DispatchEnvelope], dict[str, Any]],
+    resume: Callable[[str, str, str], dict[str, Any]],
+) -> None:
+    """由路由进程安装自己的 A2A Client。"""
+    global _send_impl, _resume_impl
+    _send_impl = send
+    _resume_impl = resume
+
+
+def send_dispatch(envelope: DispatchEnvelope) -> dict[str, Any]:
+    if _send_impl is None:
+        return {"type": "failed", "payload": {"message": "A2A 客户端未安装"}}
+    return _send_impl(envelope)
+
+
+def resume_via_http(expert: str, task_id: str, action: str) -> dict[str, Any]:
+    if _resume_impl is None:
+        return {"type": "failed", "payload": {"message": "A2A 客户端未安装"}}
+    return _resume_impl(expert, task_id, action)
 
 
 def _summarize(text: str, limit: int = 240) -> str:

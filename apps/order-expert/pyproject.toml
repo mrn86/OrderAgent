@@ -10,3 +10,7 @@ dependencies = ["agent-common"]
 
 [tool.setuptools]
 py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tools*", "agent_a2a*", "prompts*", "access*"]

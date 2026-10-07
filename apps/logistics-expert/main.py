@@ -6,19 +6,38 @@ import os
 import sys
 from pathlib import Path
 
-os.environ.setdefault("AGENT_ROLE", "logistics")
-os.environ.setdefault("AGENT_ID", "logistics-expert")
-os.environ.setdefault("AGENT_NAME", "Logistics Expert")
+# 强制本进程身份，避免父 shell / 共享 .env 残留 AGENT_* 污染多专家启动
+os.environ["AGENT_ROLE"] = "logistics"
+os.environ["AGENT_ID"] = "logistics-expert"
+os.environ["AGENT_NAME"] = "Logistics Expert"
 
-_ROOT = Path(__file__).resolve().parents[2]
+_APP = Path(__file__).resolve().parent
+_ROOT = _APP.parents[1]
 _BACKEND = _ROOT / "backend"
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
+if str(_APP) not in sys.path:
+    sys.path.insert(0, str(_APP))
 
 from app.core.config import get_settings  # noqa: E402
 
 get_settings.cache_clear()
 
+from access import register_logistics_access  # noqa: E402
+from prompts import register_logistics_prompts  # noqa: E402
+from tools import register_logistics_tools  # noqa: E402
+
+register_logistics_access()
+register_logistics_prompts()
+register_logistics_tools()
+
+from agent_a2a import ParkedExpertTask, install_expert_a2a, park_task, take_parked  # noqa: E402
+from app.core.agent.expert_worker import bind_task_registry  # noqa: E402
+
+bind_task_registry(park=park_task, take=take_parked, parked_type=ParkedExpertTask)
+
 from app.expert_app import app, create_expert_app  # noqa: E402
+
+install_expert_a2a(app)
 
 __all__ = ["app", "create_expert_app"]

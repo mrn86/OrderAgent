@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from typing import Any, Literal
 
-from app.core.agent.a2a.task_registry import ParkedExpertTask, park_task, take_parked
 from app.core.agent.bus import save_meta
 from app.core.agent.loop import resume_agent_after_decision, stream_agent_loop
 from app.core.agent.profiles import current_profile, expert_thread_id
@@ -19,6 +19,24 @@ from app.core.audit.task import emit_agent_task
 logger = logging.getLogger(__name__)
 
 ExpertOutcomeType = Literal["report", "approval_required", "failed"]
+
+_park_task: Callable[[str, Any], None] | None = None
+_take_parked: Callable[[str], Any] | None = None
+_parked_type: type | None = None
+
+
+def bind_task_registry(*, park: Callable[[str, Any], None], take: Callable[[str], Any], parked_type: type) -> None:
+    """由当前专家进程安装自己的 HITL 挂起表。"""
+    global _park_task, _take_parked, _parked_type
+    _park_task = park
+    _take_parked = take
+    _parked_type = parked_type
+
+
+def _require_task_registry() -> tuple[Callable[[str, Any], None], Callable[[str], Any], type]:
+    if _park_task is None or _take_parked is None or _parked_type is None:
+        raise RuntimeError("A2A 任务挂起表未安装")
+    return _park_task, _take_parked, _parked_type
 
 
 def _build_report(
@@ -110,9 +128,10 @@ async def run_expert_task(raw: dict[str, Any] | DispatchEnvelope) -> dict[str, A
                     "conversationId": envelope.conversation_id,
                     "taskId": envelope.task_id,
                 }
-                park_task(
+                park, _take, parked_type = _require_task_registry()
+                park(
                     envelope.task_id,
-                    ParkedExpertTask(
+                    parked_type(
                         envelope=envelope,
                         thread_id=thread_id,
                         execution_ctx=ctx,
@@ -189,7 +208,8 @@ async def run_expert_task(raw: dict[str, Any] | DispatchEnvelope) -> dict[str, A
 
 async def resume_expert_task(task_id: str, action: str) -> dict[str, Any]:
     """HITL 恢复：approve/reject 后继续跑完并返回 report。"""
-    parked = take_parked(task_id)
+    _park, take, _parked_type = _require_task_registry()
+    parked = take(task_id)
     if parked is None:
         return {"type": "failed", "payload": {"message": "挂起任务不存在或已过期"}}
 

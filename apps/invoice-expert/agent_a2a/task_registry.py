@@ -1,9 +1,8 @@
-"""专家进程内 HITL 挂起任务（A2A 完成后等待 /v1/a2a/resume）。"""
+"""本进程内 HITL 挂起任务（A2A 完成后等待 /v1/a2a/resume）。"""
 
 from __future__ import annotations
 
 import threading
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,16 +31,3 @@ def park_task(task_id: str, parked: ParkedExpertTask) -> None:
 def take_parked(task_id: str) -> ParkedExpertTask | None:
     with _lock:
         return _parked.pop(task_id, None)
-
-
-def peek_parked(task_id: str) -> ParkedExpertTask | None:
-    with _lock:
-        return _parked.get(task_id)
-
-
-def parked_age_seconds(task_id: str) -> float | None:
-    with _lock:
-        item = _parked.get(task_id)
-        if item is None:
-            return None
-        return time.perf_counter() - item.started

@@ -18,27 +18,21 @@
 四个进程：
 
 ```bash
-# 1. 路由
-cd backend
-# Windows: .venv\Scripts\activate
-set AGENT_ROLE=router
-set AGENT_ID=router-agent
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+# 1. 路由（工具在 apps/router-agent 内创建）
+cd apps/router-agent
+uvicorn main:app --host 127.0.0.1 --port 8000
 
-# 2. 订单专家
-set AGENT_ROLE=order
-set AGENT_ID=order-expert
-uvicorn app.expert_app:app --host 127.0.0.1 --port 8001
+# 2. 订单专家（工具在 apps/order-expert 内创建）
+cd ../order-expert
+uvicorn main:app --host 127.0.0.1 --port 8001
 
-# 3. 物流专家
-set AGENT_ROLE=logistics
-set AGENT_ID=logistics-expert
-uvicorn app.expert_app:app --host 127.0.0.1 --port 8003
+# 3. 物流专家（工具在 apps/logistics-expert 内创建）
+cd ../logistics-expert
+uvicorn main:app --host 127.0.0.1 --port 8003
 
-# 4. 发票专家
-set AGENT_ROLE=invoice
-set AGENT_ID=invoice-expert
-uvicorn app.expert_app:app --host 127.0.0.1 --port 8002
+# 4. 发票专家（工具在 apps/invoice-expert 内创建）
+cd ../invoice-expert
+uvicorn main:app --host 127.0.0.1 --port 8002
 ```
 
 前端：`cd web && npm run dev` → http://127.0.0.1:5173

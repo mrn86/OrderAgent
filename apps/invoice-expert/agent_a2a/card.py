@@ -1,4 +1,4 @@
-"""专家 AgentCard 构造。"""
+"""本专家的 AgentCard。"""
 
 from __future__ import annotations
 

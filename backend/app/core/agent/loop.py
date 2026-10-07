@@ -28,13 +28,7 @@ from langgraph.types import Command
 
 from app.core.context.compression import ContextCompressionMiddleware
 from app.core.agent.loop_guard import ToolLoopGuardMiddleware
-from app.core.agent.profiles import (
-    DISPATCH_INVOICE,
-    DISPATCH_LOGISTICS,
-    DISPATCH_ORDER,
-    ROLE_ROUTER,
-    current_profile,
-)
+from app.core.agent.profiles import current_profile
 from app.core.agent.user_reply import user_visible_message
 from app.core.agent.graph_runtime import (
     OrderAgentState,
@@ -180,12 +174,9 @@ def _serialize_tool_io(value: Any) -> Any:
         return str(value)
 
 
-_DISPATCH_TOOLS = frozenset({DISPATCH_ORDER, DISPATCH_LOGISTICS, DISPATCH_INVOICE})
-_DISPATCH_STATUS_TEXT = {
-    DISPATCH_ORDER: "订单专家查询中…",
-    DISPATCH_LOGISTICS: "物流专家查询中…",
-    DISPATCH_INVOICE: "发票专家查询中…",
-}
+def _is_dispatch_tool(name: str) -> bool:
+    """派发工具命名约定：dispatch_*_expert（具体名称由路由进程定义）。"""
+    return name.startswith("dispatch_") and name.endswith("_expert")
 
 
 def _as_dict_payload(value: Any) -> dict[str, Any] | None:
@@ -307,7 +298,7 @@ def _finalize_client_answer(
 ) -> str:
     """对用户通道：路由强制 RouterUserReply schema；专家侧仍用展示清洗。"""
     fallbacks = [c for c in (dispatch_conclusions or []) if isinstance(c, str) and c.strip()]
-    if current_profile().role == ROLE_ROUTER:
+    if current_profile().expert_name is None:
         shown = _prefer_order_list_reply(raw, fallbacks)
         # output schema 门禁：只输出 message，丢弃 confidence 等额外键
         return user_visible_message(shown, fallbacks=fallbacks)
@@ -316,7 +307,7 @@ def _finalize_client_answer(
 
 def _trace_fields(name: str, observation: Any) -> dict[str, Any]:
     """派发步骤给前端的路径：专家名和工具名，不含入参与原始结果。"""
-    if name not in _DISPATCH_TOOLS:
+    if not _is_dispatch_tool(name):
         return {}
     obs = _as_dict_payload(observation)
     if not obs:
@@ -349,7 +340,7 @@ def _client_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _collect_dispatch_conclusions(steps: list[dict[str, Any]]) -> list[str]:
     found: list[str] = []
     for step in steps or []:
-        if step.get("tool") not in _DISPATCH_TOOLS:
+        if not _is_dispatch_tool(str(step.get("tool") or "")):
             continue
         obs = _as_dict_payload(step.get("observation"))
         if not obs:
@@ -707,10 +698,10 @@ async def stream_agent_loop(
                     steps.append(step)
                     # 前端不收工具入参原文
                     yield {"type": "tool_start", "tool": name}
-                    if name in _DISPATCH_TOOLS:
+                    if _is_dispatch_tool(name):
                         yield {
                             "type": "status",
-                            "content": _DISPATCH_STATUS_TEXT.get(name, "专家查询中…"),
+                            "content": "专家查询中…",
                         }
 
                 elif kind == "on_tool_end":
@@ -724,7 +715,7 @@ async def stream_agent_loop(
                             break
                     # 前端不收 observation 原文，派发步骤只带专家名和工具名
                     yield {"type": "tool_end", "tool": name, **_trace_fields(name, observation)}
-                    if name in _DISPATCH_TOOLS:
+                    if _is_dispatch_tool(name):
                         dispatch_obs = _as_dict_payload(observation)
                         if dispatch_obs:
                             conclusion = dispatch_obs.get("conclusion")

@@ -1,18 +1,16 @@
 # Order Agent Web
 
-独立的 Vue 3 前端，对接 `../backend` 对话接口。
+独立的 Vue 3 前端，对接路由 Agent（`apps/router-agent`）对话接口。
 
 ## 启动
 
 ```bash
-# 先启动后端（仓库根目录）
-cd backend
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+# 先启动路由（及订单/物流/发票专家，见仓库根 README）
+cd apps/router-agent
+uvicorn main:app --host 127.0.0.1 --port 8000
 
-# 再启动前端（仓库根目录）
-cd web
+# 再启动前端
+cd ../../web
 npm install
 npm run dev
 ```

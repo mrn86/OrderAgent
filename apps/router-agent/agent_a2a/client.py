@@ -1,4 +1,4 @@
-"""路由侧 A2A Client：派发 DispatchEnvelope，解析 report / approval_required。"""
+"""路由进程的 A2A Client：派发 DispatchEnvelope，解析 report / approval_required。"""
 
 from __future__ import annotations
 
@@ -17,13 +17,22 @@ from a2a.types.a2a_pb2 import (
     TaskState,
 )
 
-from app.core.agent.a2a.card import expert_base_url
 from app.core.agent.protocol import DispatchEnvelope
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 _executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="a2a-dispatch")
+
+
+def expert_base_url(expert: str) -> str:
+    settings = get_settings()
+    mapping = {
+        "order": settings.order_expert_a2a_url,
+        "logistics": settings.logistics_expert_a2a_url,
+        "invoice": settings.invoice_expert_a2a_url,
+    }
+    return mapping.get(expert, settings.order_expert_a2a_url).rstrip("/")
 
 
 def _run_async(coro):  # type: ignore[no-untyped-def]
@@ -74,7 +83,7 @@ async def send_dispatch_async(envelope: DispatchEnvelope) -> dict[str, Any]:
     业务 task_id 放在 data payload 里，不写 message.task_id（A2A 会要求该 Task 已存在）。
     返回 ``{"type": "report"|"approval_required"|"failed", "payload": ...}``。
     """
-    base = expert_base_url(expert=envelope.expert)
+    base = expert_base_url(envelope.expert)
     timeout_s = max(5.0, float(envelope.timeout_ms or get_settings().expert_task_timeout_ms) / 1000.0)
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s, connect=10.0)) as http:
         factory = ClientFactory(
@@ -85,7 +94,6 @@ async def send_dispatch_async(envelope: DispatchEnvelope) -> dict[str, Any]:
             )
         )
         client = await factory.create_from_url(base)
-        # 不传 message.task_id：A2A 会要求该 Task 已存在；业务 task_id 在 data payload 内。
         message = new_data_message(
             envelope.model_dump(mode="json"),
             media_type="application/json",
@@ -103,9 +111,7 @@ async def send_dispatch_async(envelope: DispatchEnvelope) -> dict[str, Any]:
             elif event.HasField("status_update") and last_task is not None:
                 last_task.status.CopyFrom(event.status_update.status)
             elif event.HasField("artifact_update") and last_task is not None:
-                # 非流式通常直接给完整 Task；流式时拼 artifact
                 art = event.artifact_update.artifact
-                # 替换同名 artifact
                 replaced = False
                 for i, existing in enumerate(last_task.artifacts):
                     if existing.artifact_id == art.artifact_id or (
@@ -130,7 +136,7 @@ def send_dispatch(envelope: DispatchEnvelope) -> dict[str, Any]:
 
 
 async def resume_via_http_async(expert: str, task_id: str, action: str) -> dict[str, Any]:
-    base = expert_base_url(expert=expert)
+    base = expert_base_url(expert)
     timeout_s = max(5.0, float(get_settings().expert_task_timeout_ms) / 1000.0)
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s, connect=10.0)) as http:
         resp = await http.post(

@@ -1,4 +1,7 @@
-"""路由专用：派发订单/物流/发票专家（Redis 总线，非 HTTP）。"""
+"""路由工具创建：派发专家与转人工。
+
+只在路由进程内安装，不并入共享业务注册表。
+"""
 
 from __future__ import annotations
 
@@ -6,8 +9,13 @@ from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
 
+from access.config import (
+    DISPATCH_INVOICE,
+    DISPATCH_LOGISTICS,
+    DISPATCH_ORDER,
+    PERM_CS_ESCALATE,
+)
 from app.core.agent.dispatch import dispatch_expert
-from app.core.agent.profiles import DISPATCH_INVOICE, DISPATCH_LOGISTICS, DISPATCH_ORDER
 from app.core.agent.protocol import ExpertName, ReportStatus
 from app.core.agent.tools.governance import (
     Effect,
@@ -17,7 +25,8 @@ from app.core.agent.tools.governance import (
     ToolDefinition,
     ToolPolicy,
 )
-from app.core.agent.tools.permissions import PERM_CS_ESCALATE, get_execution_context
+from app.core.agent.tools.permissions import get_execution_context
+from app.core.config import get_settings
 
 DISPATCH_POLICY = ToolPolicy(
     effect=Effect.READ,
@@ -26,6 +35,14 @@ DISPATCH_POLICY = ToolPolicy(
     timeout_seconds=180.0,
     max_retries=0,
     idempotent=False,
+)
+ESCALATE_POLICY = ToolPolicy(
+    effect=Effect.WRITE,
+    risk=Risk.HIGH,
+    permission=PERM_CS_ESCALATE,
+    timeout_seconds=3.0,
+    max_retries=0,
+    idempotent=True,
 )
 
 
@@ -71,6 +88,12 @@ class DispatchExpertResult(StrictResult):
     approvalRequired: DispatchApproval | None = None
 
 
+class EscalateToHumanCsArgs(StrictArgs):
+    """转人工：reason 写入前端 humanCs 载荷，供用户理解转接原因。"""
+
+    reason: str = Field(default="无法自动处理", min_length=1, max_length=200)
+
+
 def _ctx_ids() -> tuple[str, str]:
     ctx = get_execution_context()
     cid = (ctx.conversation_id if ctx else "") or ""
@@ -114,7 +137,18 @@ def _dispatch_invoice(args: DispatchExpertArgs) -> dict[str, Any]:
     )
 
 
-DISPATCH_DEFINITIONS: list[ToolDefinition] = [
+def _escalate_to_human_cs(args: EscalateToHumanCsArgs) -> dict[str, Any]:
+    settings = get_settings()
+    return {
+        "needHuman": True,
+        "reason": args.reason,
+        "csName": "人工客服",
+        "csUrl": settings.human_cs_url,
+        "guide": f"如需进一步帮助，请联系人工客服：{settings.human_cs_url}",
+    }
+
+
+ROUTER_TOOL_DEFINITIONS: list[ToolDefinition] = [
     ToolDefinition(
         name=DISPATCH_ORDER,
         description=(
@@ -155,4 +189,20 @@ DISPATCH_DEFINITIONS: list[ToolDefinition] = [
         policy=DISPATCH_POLICY,
         handler=_dispatch_invoice,  # type: ignore[arg-type]
     ),
+    ToolDefinition(
+        name="escalate_to_human_cs",
+        description=(
+            "无法回答或超出订单/物流/售后/退款/发票能力时，转人工客服兜底，返回人工客服链接。"
+            "业务范围内信息不全时应先追问或调用查询类工具，不要用本工具。"
+        ),
+        parameters_model=EscalateToHumanCsArgs,
+        policy=ESCALATE_POLICY,
+        handler=_escalate_to_human_cs,  # type: ignore[arg-type]
+    ),
 ]
+
+
+def register_router_tools() -> None:
+    from app.core.agent.tools import install_process_tools
+
+    install_process_tools(ROUTER_TOOL_DEFINITIONS)

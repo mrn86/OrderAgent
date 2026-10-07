@@ -1,14 +1,29 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 from app.core.agent.bus import reset_task_bus, use_memory_bus
 from app.core.agent.dispatch import dispatch_expert, send_control
-from app.core.agent.profiles import expert_thread_id, profile_for_role
+from app.core.agent.profiles import current_profile, expert_thread_id, install_process_profile
 from app.core.agent.protocol import ExpertReport, canonical_hash, report_from_answer
 from app.core.agent.verify import verify_report
 from app.core.audit.task import build_agent_task_record
 from app.service import fake_data
+
+_APPS = Path(__file__).resolve().parents[2] / "apps"
+
+
+def _load_access(app_name: str):
+    path = _APPS / app_name / "access" / "config.py"
+    spec = importlib.util.spec_from_file_location(f"{app_name}_access_config", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def setup_function() -> None:
@@ -21,20 +36,37 @@ def teardown_function() -> None:
 
 
 def test_profiles_split_tools():
-    router = profile_for_role("router")
-    order = profile_for_role("order")
-    logistics = profile_for_role("logistics")
-    invoice = profile_for_role("invoice")
-    assert "dispatch_order_expert" in router.tools
-    assert "dispatch_logistics_expert" in router.tools
-    assert "query_orders" not in router.tools
-    assert "query_orders" in order.tools
-    assert "get_logistics_tracking" not in order.tools
-    assert "get_logistics_tracking" in logistics.tools
-    assert "create_refund" not in logistics.tools
-    assert "get_invoice" not in order.tools
-    assert "get_invoice" in invoice.tools
-    assert "create_refund" not in invoice.tools
+    router = _load_access("router-agent").ALLOWED_TOOLS
+    order = _load_access("order-expert").ALLOWED_TOOLS
+    logistics = _load_access("logistics-expert").ALLOWED_TOOLS
+    invoice = _load_access("invoice-expert").ALLOWED_TOOLS
+    assert "dispatch_order_expert" in router
+    assert "dispatch_logistics_expert" in router
+    assert "query_orders" not in router
+    assert "query_orders" in order
+    assert "get_logistics_tracking" not in order
+    assert "get_logistics_tracking" in logistics
+    assert "create_refund" not in logistics
+    assert "get_invoice" not in order
+    assert "get_invoice" in invoice
+    assert "create_refund" not in invoice
+    assert "escalate_to_human_cs" in router
+    assert "escalate_to_human_cs" in order
+    assert "escalate_to_human_cs" in logistics
+    assert "escalate_to_human_cs" in invoice
+    order_access = _load_access("order-expert")
+    install_process_profile(
+        role="order",
+        prompt_key="order_expert_system",
+        expert_name="order",
+        agent_id="order-expert",
+        tools=order,
+        permissions=order_access.PERMISSIONS,
+    )
+    profile = current_profile()
+    assert profile.tools == order
+    assert profile.expert_name == "order"
+    assert "order:read" in profile.permissions
     tid = expert_thread_id("c1", "order-expert", "t1")
     assert tid == "c1:order-expert:t1"
 

@@ -1,9 +1,26 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
+from pathlib import Path
+
 from app.core.agent.dispatch import slim_dispatch_for_agent
 from app.core.agent.loop import _client_steps, _display_answer, _prefer_order_list_reply
-from app.core.agent.tools.dispatch_tools import DISPATCH_DEFINITIONS
 from app.core.agent.tools.governance import ResultVerificationError, verify_tool_result
+
+_ROUTER_APP = Path(__file__).resolve().parents[2] / "apps" / "router-agent"
+sys.path = [p for p in sys.path if "apps" not in Path(p).as_posix()]
+sys.path.insert(0, str(_ROUTER_APP))
+for _name in list(sys.modules):
+    if _name == "access" or _name.startswith("access."):
+        del sys.modules[_name]
+_ROUTER_TOOLS = _ROUTER_APP / "tools" / "definitions.py"
+_spec = importlib.util.spec_from_file_location("router_tool_definitions", _ROUTER_TOOLS)
+assert _spec is not None and _spec.loader is not None
+_router_tools = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _router_tools
+_spec.loader.exec_module(_router_tools)
+DISPATCH_DEFINITIONS = _router_tools.ROUTER_TOOL_DEFINITIONS
 
 
 def test_slim_dispatch_drops_report_and_progress():
