@@ -130,13 +130,13 @@ def test_verify_detects_missing_and_hash_mismatch():
     assert verdict.ok is False
     assert verdict.need_review or any("无法复核" in i for i in verdict.issues)
 
-    order = fake_data.get_order_by_id("O20260920001")
+    order = fake_data.get_order_by_id("O20261002002")
     good = ExpertReport(
         conclusion="ok",
         evidence=[
             {
                 "source": "order_id",
-                "id": "O20260920001",
+                "id": "O20261002002",
                 "result_hash": canonical_hash(order),
             }
         ],

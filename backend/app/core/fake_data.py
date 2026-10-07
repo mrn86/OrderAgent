@@ -6,86 +6,6 @@ from copy import deepcopy
 from typing import Any
 import json
 
-ORDER = {
-    "orderId": "O20260920001",
-    "orderNo": "2026092012345678",
-    "status": "SHIPPING",
-    "statusText": "运输中",
-    "createdAt": "2026-09-23T14:22:10+08:00",
-    "paidAt": "2026-09-23T14:23:01+08:00",
-    "shippedAt": "2026-09-24T10:00:00+08:00",
-    "completedAt": None,
-    "cancelledAt": None,
-    "buyer": {"userId": "U10086", "nicknameMask": "宁*"},
-    "amounts": {
-        "goodsAmount": 32900,
-        "freightAmount": 0,
-        "discountAmount": 3000,
-        "payAmount": 29900,
-        "currency": "CNY",
-    },
-    "payment": {
-        "payChannel": "WECHAT",
-        "payChannelText": "微信支付",
-        "transactionNo": "420000xxxxxxx",
-        "paidAt": "2026-09-23T14:23:01+08:00",
-    },
-    "items": [
-        {
-            "orderItemId": "OI-1",
-            "skuId": "SKU-8899",
-            "spuId": "SPU-1001",
-            "spuName": "轻跑运动鞋",
-            "skuAttrs": "红色 / 42码",
-            "quantity": 1,
-            "unitPrice": 32900,
-            "payPrice": 29900,
-            "imageUrl": "https://cdn.example.com/sku/8899.jpg",
-            "afterSaleStatus": None,
-        }
-    ],
-    "receiver": {
-        "nameMask": "张*",
-        "mobileMask": "138****0000",
-        "province": "上海市",
-        "city": "上海市",
-        "district": "浦东新区",
-        "addressMask": "世纪大道****",
-    },
-    "merchant": {"merchantId": "M10001", "merchantName": "运动旗舰店"},
-    "logisticsSummary": {
-        "packageCount": 1,
-        "expressCompany": "顺丰速运",
-        "trackingNo": "SF1234567890",
-        "status": "IN_TRANSIT",
-        "statusText": "运输中",
-        "latestTrace": "快件已到达【上海转运中心】",
-        "latestTraceAt": "2026-09-28T21:10:00+08:00",
-        "eta": {
-            "predictArriveAt": "2026-09-29T18:00:00+08:00",
-            "predictArriveWindow": {
-                "earliest": "2026-09-29T14:00:00+08:00",
-                "latest": "2026-09-29T20:00:00+08:00",
-            },
-            "confidence": 0.86,
-            "delayRisk": "LOW",
-            "isOverdue": False,
-        },
-    },
-    "afterSaleSummary": {
-        "hasAfterSale": True,
-        "activeCount": 1,
-        "latestAfterSaleId": "AS20260925001",
-    },
-    "invoiceSummary": {
-        "eligible": True,
-        "invoiced": True,
-        "invoiceId": "INV20260929001",
-        "status": "ISSUED",
-    },
-    "remark": {"buyerRemark": "尽量工作日派送", "merchantRemark": None},
-}
-
 ORDER_2 = {
     "orderId": "O20260915008",
     "orderNo": "2026091508765432",
@@ -157,7 +77,7 @@ ORDER_2 = {
     "remark": {"buyerRemark": None, "merchantRemark": None},
 }
 
-# 额外假订单：5 种状态 × 5 = 25，状态均匀分布（保留上方 ORDER / ORDER_2 供物流/售后/发票样例关联）
+# 额外假订单：待发货 / 运输中 / 已送达 / 交易完成。物流与退货样例挂在运输中那条上。
 _ORDER_STATUS_CYCLE: list[tuple[str, str]] = [
     ("PAID", "待发货"),
     ("SHIPPING", "运输中"),
@@ -381,11 +301,29 @@ def _build_extra_orders(count: int = 25) -> list[dict[str, Any]]:
     return rows
 
 
-EXTRA_ORDERS = _build_extra_orders(25)
+EXTRA_ORDERS = _build_extra_orders(4)
+# 运输中：挂退货售后，运单与 LOGISTICS 对齐
+_shipping = EXTRA_ORDERS[1]
+_shipping["afterSaleSummary"] = {
+    "hasAfterSale": True,
+    "activeCount": 1,
+    "latestAfterSaleId": "AS20260925001",
+}
+_shipping["logisticsSummary"]["expressCompany"] = "顺丰速运"
+_shipping["logisticsSummary"]["trackingNo"] = "SF1234567890"
+_shipping["logisticsSummary"]["latestTrace"] = "快件已到达【上海转运中心】"
+# 交易完成：挂已开具发票
+_completed = EXTRA_ORDERS[3]
+_completed["invoiceSummary"] = {
+    "eligible": True,
+    "invoiced": True,
+    "invoiceId": "INV20260929001",
+    "status": "ISSUED",
+}
 
 LOGISTICS = {
-    "orderId": "O20260920001",
-    "orderNo": "2026092012345678",
+    "orderId": "O20261002002",
+    "orderNo": "2026100210000002",
     "packages": [
         {
             "packageId": "PKG-1",
@@ -434,25 +372,25 @@ LOGISTICS = {
 
 AFTER_SALE = {
     "afterSaleId": "AS20260925001",
-    "orderId": "O20260920001",
-    "orderNo": "2026092012345678",
+    "orderId": "O20261002002",
+    "orderNo": "2026100210000002",
     "type": "RETURN",
     "typeText": "退货退款",
     "status": "RETURNING",
     "statusText": "退货寄回中",
     "reasonCode": "QUALITY",
     "reasonText": "商品质量问题",
-    "applyAmount": 29900,
+    "applyAmount": 19800,
     "refundAmount": None,
     "currency": "CNY",
     "createdAt": "2026-09-25T11:00:00+08:00",
     "updatedAt": "2026-09-26T09:30:00+08:00",
     "items": [
         {
-            "orderItemId": "OI-1",
-            "skuId": "SKU-8899",
-            "spuName": "轻跑运动鞋",
-            "quantity": 1,
+            "orderItemId": "OI-E2",
+            "skuId": "SKU-7102",
+            "spuName": "速干T恤",
+            "quantity": 2,
         }
     ],
     "progress": {
@@ -687,13 +625,13 @@ REFUND = {
 INVOICE = {
     "invoiceId": "INV20260929001",
     "applicationNo": "IA20260929001",
-    "orderId": "O20260920001",
-    "orderNo": "2026092012345678",
+    "orderId": "O20261004004",
+    "orderNo": "2026100410000004",
     "status": "ISSUED",
     "statusText": "已开票",
     "invoiceType": "ELECTRONIC_NORMAL",
     "invoiceTypeText": "电子普通发票",
-    "amount": 29900,
+    "amount": 15300,
     "currency": "CNY",
     "title": {
         "titleType": "ENTERPRISE",
@@ -708,14 +646,14 @@ INVOICE = {
     "seller": {"name": "运动旗舰店所属主体", "taxNo": "91310000MA2XXXXXX"},
     "lineItems": [
         {
-            "name": "轻跑运动鞋",
-            "spec": "红色 / 42码",
+            "name": "健身护腕",
+            "spec": "黑色 / 一对",
             "unit": "件",
-            "quantity": "1",
-            "unitPrice": 29900,
-            "amount": 29900,
+            "quantity": "2",
+            "unitPrice": 7900,
+            "amount": 15300,
             "taxRate": "0.13",
-            "taxAmount": 3439,
+            "taxAmount": 1761,
         }
     ],
     "files": [
@@ -764,7 +702,7 @@ def _clone(obj: Any) -> Any:
 
 
 def all_orders() -> list[dict[str, Any]]:
-    return [_clone(ORDER), _clone(ORDER_2)] + [_clone(o) for o in EXTRA_ORDERS]
+    return [_clone(ORDER_2)] + [_clone(o) for o in EXTRA_ORDERS]
 
 
 def get_order_by_id(order_id: str) -> dict[str, Any] | None:

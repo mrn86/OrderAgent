@@ -62,9 +62,9 @@ npm run dev
 鉴权 Header 默认：`Authorization: Bearer test-token`
 
 ```bash
-curl -H "Authorization: Bearer test-token" "http://127.0.0.1:8000/v1/orders?orderNo=2026092012345678"
-curl -H "Authorization: Bearer test-token" http://127.0.0.1:8000/v1/orders/O20260920001
-curl -H "Authorization: Bearer test-token" http://127.0.0.1:8000/v1/logistics/by-order-no/2026092012345678
+curl -H "Authorization: Bearer test-token" "http://127.0.0.1:8000/v1/orders?orderNo=2026100210000002"
+curl -H "Authorization: Bearer test-token" http://127.0.0.1:8000/v1/orders/O20261002002
+curl -H "Authorization: Bearer test-token" http://127.0.0.1:8000/v1/logistics/by-order-no/2026100210000002
 ```
 
 Agent 对话请使用 Web 前端，或：
@@ -73,14 +73,14 @@ Agent 对话请使用 Web 前端，或：
 curl -X POST http://127.0.0.1:8000/v1/agent/chat \
   -H "Authorization: Bearer test-token" \
   -H "Content-Type: application/json" \
-  -d "{\"query\":\"帮我查订单号 2026092012345678 的物流\"}"
+  -d "{\"query\":\"帮我查订单号 2026100210000002 的物流\"}"
 ```
 
 ## 4. 假数据主键
 
 | 类型 | 值 |
 |------|----|
-| 订单号（运输中 + 退货中） | `2026092012345678` / `O20260920001` |
+| 订单号（运输中 + 退货中） | `2026100210000002` / `O20261002002` |
 | 售后单（退货退款进行中） | `AS20260925001` |
 | 订单号（已完成 + 仅退款成功） | `2026091508765432` / `O20260915008` |
 | 售后单 / 退款单 | `AS20260918008` / `RF20260929001` |

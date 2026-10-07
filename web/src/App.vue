@@ -15,7 +15,7 @@ const messages = ref([
     id: 'welcome',
     role: 'assistant',
     content:
-      '你好，我是 Order Agent。可以问我订单、物流、退货退款或发票，例如：帮我查订单号 2026092012345678 的物流。',
+      '你好，我是 Order Agent。可以问我订单、物流、退货退款或发票，例如：帮我查订单号 2026100210000002 的物流。',
   },
 ])
 
@@ -288,10 +288,10 @@ onMounted(scrollBottom)
       </section>
 
       <div class="hints">
-        <button type="button" @click="fillHint('帮我查订单号 2026092012345678 的物流到哪了')">
+        <button type="button" @click="fillHint('帮我查订单号 2026100210000002 的物流到哪了')">
           查物流
         </button>
-        <button type="button" @click="fillHint('订单 O20260920001 的退货退款进度怎么样')">
+        <button type="button" @click="fillHint('订单 O20261002002 的退货退款进度怎么样')">
           查售后
         </button>
         <button type="button" @click="fillHint('查看发票 INV20260929001 并给我下载链接')">
@@ -494,6 +494,23 @@ onMounted(scrollBottom)
   font-size: 12px;
   color: var(--ink-soft);
   font-style: italic;
+  animation: status-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status {
+    animation: none;
+  }
 }
 
 .approval-card {
