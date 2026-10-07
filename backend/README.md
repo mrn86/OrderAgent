@@ -7,7 +7,8 @@ LangChain 多 Agent：路由 + 订单/物流/发票专家，共享本目录 `app
 - 物流专家：`AGENT_ROLE=logistics` → `app.expert_app:app`
 - 发票专家：`AGENT_ROLE=invoice` → `app.expert_app:app`
 
-进程间仅 Redis Stream：`oa:dispatch:{expert}` / `oa:task:{taskId}:events` / `oa:task:{taskId}:control`。
+进程间派发走 A2A（`a2a-sdk` JSON-RPC + AgentCard）；HITL 经专家 `POST /v1/a2a/resume`。
+Redis 仅保留 SSE / 任务 meta / conversation↔task HITL 映射。
 
 
 分层：

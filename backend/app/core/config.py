@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     use_fake_data: bool = True
 
+    # 专家 A2A 基址（路由进程派发用；专家进程自身 public URL 用于 AgentCard）
+    order_expert_a2a_url: str = "http://127.0.0.1:8001"
+    logistics_expert_a2a_url: str = "http://127.0.0.1:8003"
+    invoice_expert_a2a_url: str = "http://127.0.0.1:8002"
+    expert_a2a_public_url: str = ""
+
     human_cs_url: str = "http://www.baidu.com"
 
     # 上下文压缩：估窗阈值；keep 按用户轮而非消息条数

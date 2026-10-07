@@ -1,17 +1,17 @@
 # Order Agent
 
-订单智能助手 monorepo：路由 + 订单/物流/发票专家（独立进程，Redis Stream 总线）。
+订单智能助手 monorepo：路由 + 订单/物流/发票专家（独立进程，A2A 派发）。
 
 | 目录 | 说明 |
 |------|------|
 | [`packages/agent-common`](./packages/agent-common) | 共享库（`backend/app`） |
 | [`apps/router-agent`](./apps/router-agent) | 对用户 HTTP/SSE、编排与复核 |
-| [`apps/order-expert`](./apps/order-expert) | 订单/售后/退款专家 worker |
-| [`apps/logistics-expert`](./apps/logistics-expert) | 物流轨迹/运单专家 worker |
-| [`apps/invoice-expert`](./apps/invoice-expert) | 发票专家 worker |
+| [`apps/order-expert`](./apps/order-expert) | 订单/售后/退款专家（A2A Server） |
+| [`apps/logistics-expert`](./apps/logistics-expert) | 物流轨迹/运单专家（A2A Server） |
+| [`apps/invoice-expert`](./apps/invoice-expert) | 发票专家（A2A Server） |
 | [`web/`](./web) | Vue 3 对话前端（只打路由网关） |
 
-专家互不通信；只向路由回传 ExpertReport。需要 Redis 5+（任务总线与 SSE）。
+专家互不通信；路由经 A2A（JSON-RPC）派发并回收 ExpertReport。Redis 仍用于 SSE / 任务 meta / HITL 关联。
 
 ## 快速启动
 
