@@ -8,7 +8,7 @@ from app.core.agent.profiles import expert_thread_id, profile_for_role
 from app.core.agent.protocol import ExpertReport, canonical_hash, report_from_answer
 from app.core.agent.verify import verify_report
 from app.core.audit.task import build_agent_task_record
-from app.core import fake_data
+from app.service import fake_data
 
 
 def setup_function() -> None:

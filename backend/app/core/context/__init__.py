@@ -1,4 +1,4 @@
-"""对话上下文：会话 ID。对话内容在 LangGraph checkpoint。"""
+"""对话上下文：会话 ID，以及发给模型前的上下文压缩。对话内容在 LangGraph checkpoint。"""
 
 from app.core.context.store import (
     clear_conversation,

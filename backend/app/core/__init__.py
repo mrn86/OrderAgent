@@ -1,1 +1,1 @@
-"""Core: config, infra, agent loop, fake data."""
+"""Core: config, infra, agent loop."""

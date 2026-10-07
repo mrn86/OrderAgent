@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from app.core import fake_data
-from app.core.redis_client import cache_get, cache_set
+from app.service import fake_data
+from app.core.database.redis_client import cache_get, cache_set
 
 
 def _to_list_item(order: dict[str, Any]) -> dict[str, Any]:

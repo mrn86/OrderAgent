@@ -23,16 +23,17 @@ from app.core.agent.tools.permissions import (
     build_default_context,
     get_execution_context,
 )
-from app.core.agent.profiles import current_profile
-from app.core.agent.tools.dispatch_tools import DISPATCH_DEFINITIONS
 from app.core.agent.tools.registry import TOOL_DEFINITIONS
-from app.core.agent.tools.report import SUBMIT_REPORT_DEFINITION
 
 # 转人工本身是高风险写，但不应再套一层 HITL 审批卡
 _HITL_EXCLUDE = frozenset({"escalate_to_human_cs", "submit_expert_report"})
 
 
 def all_tool_definitions() -> list:
+    # 延后导入：dispatch/report 会引用 profiles，而 profiles 初始化时会先进入本包。
+    from app.core.agent.tools.dispatch_tools import DISPATCH_DEFINITIONS
+    from app.core.agent.tools.report import SUBMIT_REPORT_DEFINITION
+
     return [*TOOL_DEFINITIONS, *DISPATCH_DEFINITIONS, SUBMIT_REPORT_DEFINITION]
 
 
@@ -43,6 +44,8 @@ def resolve_execution_context(ctx: ExecutionContext | None = None) -> ExecutionC
     current = get_execution_context()
     if current is not None:
         return current
+    from app.core.agent.profiles import current_profile
+
     profile = current_profile()
     return build_default_context(
         allowed_tools=profile.tools,

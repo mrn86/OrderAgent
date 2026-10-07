@@ -16,7 +16,7 @@ ORDER_2 = {
     "shippedAt": "2026-09-16T09:00:00+08:00",
     "completedAt": "2026-09-18T16:00:00+08:00",
     "cancelledAt": None,
-    "buyer": {"userId": "U10086", "nicknameMask": "宁*"},
+    "buyer": {"userId": "U10086", "nicknameMask": "王*"},
     "amounts": {
         "goodsAmount": 45900,
         "freightAmount": 0,
@@ -252,7 +252,7 @@ def _build_extra_orders(count: int = 25) -> list[dict[str, Any]]:
                 "shippedAt": shipped,
                 "completedAt": completed,
                 "cancelledAt": cancelled,
-                "buyer": {"userId": "U10086", "nicknameMask": "宁*"},
+                "buyer": {"userId": "U10086", "nicknameMask": "王*"},
                 "amounts": {
                     "goodsAmount": goods,
                     "freightAmount": freight,
@@ -810,7 +810,7 @@ def all_refunds() -> list[dict[str, Any]]:
 
 
 def _load_created_refunds() -> list[dict[str, Any]]:
-    from app.core.redis_client import get_redis
+    from app.core.database.redis_client import get_redis
 
     client = get_redis(for_stream=True)
     if client is not None:
@@ -827,7 +827,7 @@ def _load_created_refunds() -> list[dict[str, Any]]:
 
 
 def _persist_created_refund(created: dict[str, Any]) -> None:
-    from app.core.redis_client import get_redis
+    from app.core.database.redis_client import get_redis
 
     client = get_redis(for_stream=True)
     if client is None:

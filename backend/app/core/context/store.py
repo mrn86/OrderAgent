@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
-from app.core.redis_client import get_redis
+from app.core.database.redis_client import get_redis
 
 CONVERSATION_TTL_SECONDS = 2 * 60 * 60
 _CONV_KEY = "oa:conv:{cid}"

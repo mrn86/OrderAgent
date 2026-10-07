@@ -1,1 +1,1 @@
-"""Service layer: business logic over fake data / DB."""
+"""业务服务：订单、物流、发票等逻辑；内存样例数据在 fake_data。"""

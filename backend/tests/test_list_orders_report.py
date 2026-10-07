@@ -56,6 +56,20 @@ def test_report_from_answer_uses_list_when_unstructured():
     assert "20261001001" in report.conclusion
 
 
+def test_upgrade_replaces_summary_with_line_items():
+    report = ExpertReport(
+        conclusion="已为您查询到全部订单，共 2 笔，合计实付 398.00 元。如需退款请告知订单号。",
+        status="done",
+        confidence=0.9,
+        commands=[{"tool": "query_orders", "args": {}, "ok": True}],
+    )
+    upgraded = upgrade_report_with_list_steps(report, _list_steps())
+    assert "20261001001" in upgraded.conclusion
+    assert "20261001002" in upgraded.conclusion
+    assert "299.00" in upgraded.conclusion
+    assert "合计实付" not in upgraded.conclusion
+
+
 def test_upgrade_replaces_ask_for_phone_conclusion():
     report = ExpertReport(
         conclusion="订单专家未能返回有效结果，需要补充信息。请提供订单号或手机号。",

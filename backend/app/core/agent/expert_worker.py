@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Any, Literal
 
-from app.core.agent.a2a_task_registry import ParkedExpertTask, park_task, take_parked
+from app.core.agent.a2a.task_registry import ParkedExpertTask, park_task, take_parked
 from app.core.agent.bus import save_meta
 from app.core.agent.loop import resume_agent_after_decision, stream_agent_loop
 from app.core.agent.profiles import current_profile, expert_thread_id

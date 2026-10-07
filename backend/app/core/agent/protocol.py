@@ -159,9 +159,7 @@ def report_from_answer(
             report.expert = report.expert or expert
             if not report.commands and cmds:
                 report.commands = cmds
-            # 列表查询已成功但结论空/敷衍时，用列表生成结论
-            weak = not (report.conclusion or "").strip() or report.status == "need_more_info"
-            if list_conclusion and weak:
+            if list_conclusion:
                 report.conclusion = list_conclusion
                 report.status = "done"
                 if report.confidence < 0.75:
@@ -191,42 +189,24 @@ def report_from_answer(
     )
 
 
-_WEAK_LIST_CONCLUSION = (
-    "手机号",
-    "账号",
-    "未能返回有效",
-    "需要补充",
-    "提供以下",
-    "订单号（如有",
-    "大致时间",
-)
-
-
 def upgrade_report_with_list_steps(
     report: ExpertReport,
     steps: list[dict[str, Any]] | None,
 ) -> ExpertReport:
-    """列表工具已成功时，避免错误的 need_more_info / 向用户追问覆盖真实列表结论。"""
+    """query_orders 已成功时，结论固定为逐笔列表，不用模型汇总覆盖。"""
     list_conclusion = conclusion_from_query_orders_steps(steps)
     if not list_conclusion:
         return report
     if not report.commands:
         report.commands = commands_from_steps(steps or [])
-    text = report.conclusion or ""
-    weak = (
-        report.status in {"need_more_info", "failed"}
-        or not text.strip()
-        or any(m in text for m in _WEAK_LIST_CONCLUSION)
-    )
-    if weak:
-        report.conclusion = list_conclusion
-        report.status = "done"
-        report.confidence = max(float(report.confidence or 0), 0.85)
-        report.unresolved = [
-            u
-            for u in (report.unresolved or [])
-            if "未能解析" not in u and "补充" not in u
-        ]
+    report.conclusion = list_conclusion
+    report.status = "done"
+    report.confidence = max(float(report.confidence or 0), 0.85)
+    report.unresolved = [
+        u
+        for u in (report.unresolved or [])
+        if "未能解析" not in u and "补充" not in u
+    ]
     return report
 
 

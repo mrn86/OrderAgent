@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from urllib.parse import quote
 
-from app.core import fake_data
+from app.service import fake_data
 
 
 def get_invoice(

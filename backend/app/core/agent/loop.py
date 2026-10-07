@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import replace
 from typing import Any, AsyncIterator, Iterator, Optional
 
@@ -25,7 +26,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from app.core.agent.compression import ContextCompressionMiddleware
+from app.core.context.compression import ContextCompressionMiddleware
 from app.core.agent.loop_guard import ToolLoopGuardMiddleware
 from app.core.agent.profiles import (
     DISPATCH_INVOICE,
@@ -264,6 +265,41 @@ def _display_answer(raw: str, *, dispatch_conclusions: list[str] | None = None) 
     return text
 
 
+def _is_order_list_text(text: str) -> bool:
+    body = (text or "").strip()
+    if body == "未查询到订单。":
+        return True
+    first = body.splitlines()[0] if body else ""
+    return first.startswith("共查到 ") and "订单号" in body
+
+
+def _reply_keeps_order_lines(raw: str, listing: str) -> bool:
+    """路由答复是否已经带上列表里的每一笔订单号。"""
+    numbers = re.findall(r"订单号\s+([^\s｜|，,]+)", listing)
+    if not numbers:
+        return listing.strip() in (raw or "")
+    return all(num.rstrip("｜|") in (raw or "") for num in numbers)
+
+
+def _prefer_order_list_reply(raw: str, conclusions: list[str] | None) -> str:
+    """订单列表已被派发结论写好时，不用路由模型的汇总替换逐笔列表。"""
+    text = (raw or "").strip()
+    lists = [c.strip() for c in (conclusions or []) if isinstance(c, str) and _is_order_list_text(c)]
+    if not lists:
+        return text
+    listing = lists[-1]
+    if _reply_keeps_order_lines(text, listing):
+        return text
+    others = [
+        c.strip()
+        for c in (conclusions or [])
+        if isinstance(c, str) and c.strip() and c.strip() not in lists
+    ]
+    if others:
+        return listing + "\n\n" + "\n\n".join(others)
+    return listing
+
+
 def _finalize_client_answer(
     raw: str,
     *,
@@ -272,19 +308,41 @@ def _finalize_client_answer(
     """对用户通道：路由强制 RouterUserReply schema；专家侧仍用展示清洗。"""
     fallbacks = [c for c in (dispatch_conclusions or []) if isinstance(c, str) and c.strip()]
     if current_profile().role == ROLE_ROUTER:
+        shown = _prefer_order_list_reply(raw, fallbacks)
         # output schema 门禁：只输出 message，丢弃 confidence 等额外键
-        return user_visible_message(raw, fallbacks=fallbacks)
+        return user_visible_message(shown, fallbacks=fallbacks)
     return _display_answer(raw, dispatch_conclusions=fallbacks)
 
 
+def _trace_fields(name: str, observation: Any) -> dict[str, Any]:
+    """派发步骤给前端的路径：专家名和工具名，不含入参与原始结果。"""
+    if name not in _DISPATCH_TOOLS:
+        return {}
+    obs = _as_dict_payload(observation)
+    if not obs:
+        return {}
+    fields: dict[str, Any] = {}
+    expert = obs.get("expert")
+    if isinstance(expert, str) and expert.strip():
+        fields["expert"] = expert.strip()
+    tools = obs.get("tools")
+    if isinstance(tools, list):
+        names = [str(item).strip() for item in tools if isinstance(item, str) and str(item).strip()]
+        if names:
+            fields["tools"] = names
+    return fields
+
+
 def _client_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """前端步骤仅保留工具名，不含 input/observation 原始结构。"""
+    """前端步骤仅保留工具名；派发步骤可带 expert 与 tools，不含 input/observation。"""
     out: list[dict[str, Any]] = []
     for step in steps or []:
         name = step.get("tool")
         if not name:
             continue
-        out.append({"tool": name})
+        item: dict[str, Any] = {"tool": name}
+        item.update(_trace_fields(str(name), step.get("observation")))
+        out.append(item)
     return out
 
 
@@ -664,8 +722,8 @@ async def stream_agent_loop(
                         if step.get("tool") == name and step.get("observation") is None:
                             step["observation"] = observation
                             break
-                    # 前端不收 observation 原文
-                    yield {"type": "tool_end", "tool": name}
+                    # 前端不收 observation 原文，派发步骤只带专家名和工具名
+                    yield {"type": "tool_end", "tool": name, **_trace_fields(name, observation)}
                     if name in _DISPATCH_TOOLS:
                         dispatch_obs = _as_dict_payload(observation)
                         if dispatch_obs:

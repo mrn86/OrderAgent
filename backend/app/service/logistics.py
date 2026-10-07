@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from app.core import fake_data
+from app.service import fake_data
 
 
 def get_by_order_no(order_no: str, *, include_eta: bool = True) -> dict[str, Any]:

@@ -21,7 +21,7 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import AIMessage, AnyMessage, RemoveMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 
-from app.core.agent.compression import _text, _tool_rounds_this_turn
+from app.core.context.compression import _text, _tool_rounds_this_turn
 from app.core.agent.graph_runtime import OrderAgentState
 from app.core.config import get_settings
 

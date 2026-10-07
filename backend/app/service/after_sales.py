@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from app.core import fake_data
+from app.service import fake_data
 
 
 def list_after_sales(

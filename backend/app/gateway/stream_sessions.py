@@ -24,7 +24,7 @@ from app.core.audit import (
     set_audit_ids,
 )
 from app.core.context import ensure_conversation
-from app.core.redis_client import get_async_redis
+from app.core.database.redis_client import get_async_redis
 
 logger = logging.getLogger(__name__)
 

@@ -128,8 +128,19 @@ async function send() {
         else if (tool === 'dispatch_invoice_expert') current.statusText = '发票专家查询中…'
         else if (tool === 'escalate_to_human_cs') current.statusText = '准备转人工…'
         else current.statusText = '正在处理…'
-        current.steps = [...(current.steps || []), { tool }]
+        current.steps = [...(current.steps || []), { tool, pending: true }]
       } else if (event.type === 'tool_end') {
+        const steps = [...(current.steps || [])]
+        for (let i = steps.length - 1; i >= 0; i -= 1) {
+          if (steps[i].tool === event.tool && steps[i].pending) {
+            const next = { ...steps[i], pending: false }
+            if (event.expert) next.expert = event.expert
+            if (Array.isArray(event.tools) && event.tools.length) next.tools = event.tools
+            steps[i] = next
+            break
+          }
+        }
+        current.steps = steps
         if (!current.statusText || current.statusText.startsWith('正在') || current.statusText.includes('查询')) {
           current.statusText = '正在整理答复…'
         }
@@ -209,6 +220,17 @@ function onKeydown(event) {
   }
 }
 
+const TRACE_LABELS = {
+  dispatch_order_expert: '订单专家',
+  dispatch_logistics_expert: '物流专家',
+  dispatch_invoice_expert: '发票专家',
+  escalate_to_human_cs: '转人工',
+}
+
+function traceLabel(step) {
+  return TRACE_LABELS[step?.tool] || step?.tool || '工具'
+}
+
 function fillHint(text) {
   input.value = text
 }
@@ -246,6 +268,19 @@ onMounted(scrollBottom)
             />
             <div v-else class="content plain">{{ msg.content }}</div>
             <span v-if="msg.streaming && msg.content" class="cursor" aria-hidden="true" />
+            <details v-if="msg.role === 'assistant' && msg.steps?.length" class="steps">
+              <summary>调用路径</summary>
+              <ol>
+                <li v-for="(step, index) in msg.steps" :key="`${msg.id}-step-${index}`">
+                  {{ traceLabel(step) }}
+                  <ol v-if="step.tools?.length">
+                    <li v-for="(tool, toolIndex) in step.tools" :key="`${msg.id}-tool-${index}-${toolIndex}`">
+                      <code>{{ tool }}</code>
+                    </li>
+                  </ol>
+                </li>
+              </ol>
+            </details>
             <div v-if="msg.approval" class="approval-card">
               <p class="approval-title">高风险操作待审批</p>
               <p class="approval-summary">{{ msg.approval.summary || formatApprovalArgs(msg.approval.args) }}</p>
@@ -477,9 +512,18 @@ onMounted(scrollBottom)
   opacity: 0.9;
 }
 
-.steps ul {
+.steps summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+
+.steps ol {
   margin: 8px 0 0;
   padding-left: 18px;
+}
+
+.steps ol ol {
+  margin-top: 4px;
 }
 
 .steps code {

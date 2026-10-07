@@ -3,28 +3,68 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
-from app.core.agent.protocol import CommandRecord, EvidenceItem, ExpertReport, PathStep
 from app.core.agent.profiles import SUBMIT_REPORT
-from app.core.agent.tools.governance import Effect, Risk, StrictArgs, ToolDefinition, ToolPolicy
+from app.core.agent.protocol import CommandRecord, EvidenceItem, ExpertReport, PathStep, ReportStatus
+from app.core.agent.tools.governance import (
+    Effect,
+    Risk,
+    StrictArgs,
+    StrictResult,
+    ToolDefinition,
+    ToolPolicy,
+)
 from app.core.agent.tools.permissions import PERM_CS_ESCALATE
 
 _last_report: ContextVar[ExpertReport | None] = ContextVar("expert_report", default=None)
 
+EvidenceSource = Literal["order_id", "order_no", "invoice_id", "refund_id", "after_sale_id"]
+
+
+class _ReportPart(StrictArgs):
+    """报告嵌套字段：与工具参数一样拒绝未声明键。"""
+
+
+class SubmitEvidence(_ReportPart):
+    source: EvidenceSource
+    id: str = ""
+    excerpt: str = ""
+    result_hash: str = ""
+
+
+class SubmitPathStep(_ReportPart):
+    step: str
+    detail: str = ""
+
+
+class SubmitCommand(_ReportPart):
+    tool: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    result_hash: str = ""
+    ok: bool = True
+
 
 class SubmitExpertReportArgs(StrictArgs):
     conclusion: str = Field(..., min_length=1, max_length=4000)
-    evidence: list[dict[str, Any]] = Field(default_factory=list)
-    path: list[dict[str, Any]] = Field(default_factory=list)
-    commands: list[dict[str, Any]] = Field(default_factory=list)
+    evidence: list[SubmitEvidence] = Field(default_factory=list)
+    path: list[SubmitPathStep] = Field(default_factory=list)
+    commands: list[SubmitCommand] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.7, ge=0.0, le=1.0)
     unresolved: list[str] = Field(default_factory=list)
     suggested_next: list[str] = Field(default_factory=list)
-    status: str = Field(default="done")
+    status: ReportStatus = "done"
+
+
+class SubmitExpertReportResult(StrictResult):
+    model_config = ConfigDict(extra="forbid")
+
+    ok: Literal[True]
+    accepted: Literal[True]
+    conclusion: str
 
 
 def get_submitted_report() -> ExpertReport | None:
@@ -36,43 +76,46 @@ def clear_submitted_report() -> None:
 
 
 def _submit(args: SubmitExpertReportArgs) -> dict[str, Any]:
-    evidence = []
-    for item in args.evidence:
-        if isinstance(item, dict):
-            evidence.append(EvidenceItem.model_validate(item))
-    path = []
-    for item in args.path:
-        if isinstance(item, dict):
-            path.append(PathStep.model_validate(item))
-    commands = []
-    for item in args.commands:
-        if isinstance(item, dict):
-            commands.append(CommandRecord.model_validate(item))
-    status = args.status if args.status in {"done", "failed", "need_hitl", "need_more_info"} else "done"
     report = ExpertReport(
         conclusion=args.conclusion,
-        evidence=evidence,
-        path=path,
-        commands=commands,
+        evidence=[
+            EvidenceItem(
+                source=item.source,
+                id=item.id,
+                excerpt=item.excerpt,
+                result_hash=item.result_hash,
+            )
+            for item in args.evidence
+        ],
+        path=[PathStep(step=item.step, detail=item.detail) for item in args.path],
+        commands=[
+            CommandRecord(
+                tool=item.tool,
+                args=item.args,
+                result_hash=item.result_hash,
+                ok=item.ok,
+            )
+            for item in args.commands
+        ],
         risks=list(args.risks),
         confidence=args.confidence,
         unresolved=list(args.unresolved),
         suggested_next=list(args.suggested_next),
-        status=status,  # type: ignore[arg-type]
+        status=args.status,
     )
     _last_report.set(report)
-    return {"ok": True, "accepted": True, "conclusion": report.conclusion}
+    return SubmitExpertReportResult(
+        ok=True,
+        accepted=True,
+        conclusion=report.conclusion,
+    ).model_dump(mode="json")
 
 
 SUBMIT_REPORT_DEFINITION = ToolDefinition(
     name=SUBMIT_REPORT,
-    description=(
-        "提交本任务的结构化专家报告（必须在结束前调用一次）。"
-        "字段：conclusion, evidence[{source,id,excerpt,result_hash}], path, commands, "
-        "risks, confidence(0-1), unresolved, suggested_next, status。"
-        "evidence.source 用 order_id / order_no / invoice_id / refund_id / after_sale_id。"
-    ),
+    description="结束前必须调用一次，提交结构化专家报告。",
     parameters_model=SubmitExpertReportArgs,
+    result_model=SubmitExpertReportResult,
     policy=ToolPolicy(
         effect=Effect.READ,
         risk=Risk.LOW,

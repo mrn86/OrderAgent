@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.core import fake_data
+from app.service import fake_data
 from app.core.agent.protocol import ExpertReport, canonical_hash
 from app.service import invoices as invoice_service
 from app.service import refunds as refund_service

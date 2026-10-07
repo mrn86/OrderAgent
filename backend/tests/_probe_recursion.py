@@ -5,7 +5,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 
-from app.core.agent.compression import ContextCompressionMiddleware
+from app.core.context.compression import ContextCompressionMiddleware
 from app.core.agent.graph_runtime import OrderAgentState
 from app.core.agent.loop_guard import ToolLoopGuardMiddleware
 

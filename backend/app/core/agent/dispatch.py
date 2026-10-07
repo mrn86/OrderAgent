@@ -7,7 +7,7 @@ import time
 import uuid
 from typing import Any
 
-from app.core.agent.a2a_client import resume_via_http, send_dispatch
+from app.core.agent.a2a.client import resume_via_http, send_dispatch
 from app.core.agent.bus import (
     clear_pending_hitl,
     get_pending_hitl,
@@ -72,6 +72,15 @@ def slim_dispatch_for_agent(result: dict[str, Any]) -> dict[str, Any]:
         "risks": list(risks) if isinstance(risks, list) else [],
         "unresolved": list(unresolved) if isinstance(unresolved, list) else [],
     }
+    tools: list[str] = []
+    for cmd in report.get("commands") or []:
+        tool_name = cmd.get("tool") if isinstance(cmd, dict) else None
+        if isinstance(tool_name, str):
+            tool_name = tool_name.strip()
+            if tool_name and tool_name != "submit_expert_report":
+                tools.append(tool_name)
+    if tools:
+        out["tools"] = tools
     if verified is not None:
         out["verified"] = verified
     if result.get("message"):

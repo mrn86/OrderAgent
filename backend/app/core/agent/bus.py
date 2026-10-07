@@ -9,7 +9,7 @@ import time
 from typing import Any, Protocol
 
 from app.core.config import get_settings
-from app.core.redis_client import get_async_redis, get_redis
+from app.core.database.redis_client import get_async_redis, get_redis
 
 logger = logging.getLogger(__name__)
 

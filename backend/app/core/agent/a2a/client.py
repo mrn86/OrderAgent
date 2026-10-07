@@ -17,7 +17,7 @@ from a2a.types.a2a_pb2 import (
     TaskState,
 )
 
-from app.core.agent.a2a_card import expert_base_url
+from app.core.agent.a2a.card import expert_base_url
 from app.core.agent.protocol import DispatchEnvelope
 from app.core.config import get_settings
 
@@ -69,6 +69,11 @@ def _parse_task_result(task) -> dict[str, Any]:  # type: ignore[no-untyped-def]
 
 
 async def send_dispatch_async(envelope: DispatchEnvelope) -> dict[str, Any]:
+    """经 A2A JSON-RPC 把 DispatchEnvelope 发给对应专家，并等到任务结束。
+
+    业务 task_id 放在 data payload 里，不写 message.task_id（A2A 会要求该 Task 已存在）。
+    返回 ``{"type": "report"|"approval_required"|"failed", "payload": ...}``。
+    """
     base = expert_base_url(expert=envelope.expert)
     timeout_s = max(5.0, float(envelope.timeout_ms or get_settings().expert_task_timeout_ms) / 1000.0)
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s, connect=10.0)) as http:

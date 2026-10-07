@@ -123,7 +123,7 @@ def test_agent_graph_has_no_pii_middleware_nodes():
     from langchain.agents import create_agent
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from app.core.agent.compression import ContextCompressionMiddleware
+    from app.core.context.compression import ContextCompressionMiddleware
     from app.core.agent.loop_guard import ToolLoopGuardMiddleware
 
     model = FakeListChatModel(responses=["好的"])

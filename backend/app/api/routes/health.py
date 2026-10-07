@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from app.core.db import ping_db
-from app.core.redis_client import ping_redis
+from app.core.database.db import ping_db
+from app.core.database.redis_client import ping_redis
 from app.core.response import ok
 
 router = APIRouter()

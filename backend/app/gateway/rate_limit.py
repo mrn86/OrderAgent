@@ -35,7 +35,7 @@ def check_rate_limit(
     key = token or "anonymous"
     now = time.monotonic()
 
-    from app.core.redis_client import get_redis
+    from app.core.database.redis_client import get_redis
 
     client = get_redis(for_stream=True)
     if client is not None:

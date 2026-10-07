@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from app.core.agent.dispatch import dispatch_expert
 from app.core.agent.profiles import DISPATCH_INVOICE, DISPATCH_LOGISTICS, DISPATCH_ORDER
-from app.core.agent.tools.governance import Effect, Risk, StrictArgs, ToolDefinition, ToolPolicy
+from app.core.agent.protocol import ExpertName, ReportStatus
+from app.core.agent.tools.governance import (
+    Effect,
+    Risk,
+    StrictArgs,
+    StrictResult,
+    ToolDefinition,
+    ToolPolicy,
+)
 from app.core.agent.tools.permissions import PERM_CS_ESCALATE, get_execution_context
 
 DISPATCH_POLICY = ToolPolicy(
@@ -25,6 +33,42 @@ class DispatchExpertArgs(StrictArgs):
     instruction: str = Field(..., min_length=1, max_length=2000)
     reason: str = Field(..., min_length=2, max_length=200)
     constraints: str = Field(default="", max_length=1000)
+
+
+class _DispatchPart(StrictResult):
+    model_config = ConfigDict(extra="forbid")
+
+
+class DispatchVerified(_DispatchPart):
+    ok: bool
+    issues: list[str] = Field(default_factory=list)
+
+
+class DispatchApproval(_DispatchPart):
+    requestId: str = ""
+    tool: str = ""
+    summary: str = ""
+    conversationId: str = ""
+    taskId: str = ""
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class DispatchExpertResult(StrictResult):
+    """三个派发工具的共同返回：只保留业务摘要，拒绝未声明字段。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool
+    status: ReportStatus = "failed"
+    taskId: str = ""
+    expert: ExpertName | Literal[""] = ""
+    conclusion: str = ""
+    risks: list[str] = Field(default_factory=list)
+    unresolved: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    verified: DispatchVerified | None = None
+    message: str = ""
+    approvalRequired: DispatchApproval | None = None
 
 
 def _ctx_ids() -> tuple[str, str]:
@@ -77,11 +121,11 @@ DISPATCH_DEFINITIONS: list[ToolDefinition] = [
             "将订单/售后/退款问题指派给订单专家（独立进程）。"
             "不处理物流轨迹；物流请用 dispatch_logistics_expert。"
             "instruction 写清用户问题与已知订单号；reason 写指派原因。"
-            "返回业务摘要：conclusion（对用户结论）、status、risks、unresolved、verified.issues。"
             "用 conclusion 写最终答复，禁止向用户粘贴 JSON 或工具原始字段。"
             "若 status=need_hitl，立即停止并向用户转达审批，不要再调工具。"
         ),
         parameters_model=DispatchExpertArgs,
+        result_model=DispatchExpertResult,
         policy=DISPATCH_POLICY,
         handler=_dispatch_order,  # type: ignore[arg-type]
     ),
@@ -94,6 +138,7 @@ DISPATCH_DEFINITIONS: list[ToolDefinition] = [
             "若 status=need_hitl，立即停止。"
         ),
         parameters_model=DispatchExpertArgs,
+        result_model=DispatchExpertResult,
         policy=DISPATCH_POLICY,
         handler=_dispatch_logistics,  # type: ignore[arg-type]
     ),
@@ -106,6 +151,7 @@ DISPATCH_DEFINITIONS: list[ToolDefinition] = [
             "若 status=need_hitl，立即停止。"
         ),
         parameters_model=DispatchExpertArgs,
+        result_model=DispatchExpertResult,
         policy=DISPATCH_POLICY,
         handler=_dispatch_invoice,  # type: ignore[arg-type]
     ),
