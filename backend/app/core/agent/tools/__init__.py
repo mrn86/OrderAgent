@@ -23,24 +23,31 @@ from app.core.agent.tools.permissions import (
     build_default_context,
     get_execution_context,
 )
+from app.core.agent.profiles import current_profile
+from app.core.agent.tools.dispatch_tools import DISPATCH_DEFINITIONS
 from app.core.agent.tools.registry import TOOL_DEFINITIONS
+from app.core.agent.tools.report import SUBMIT_REPORT_DEFINITION
 
 # 转人工本身是高风险写，但不应再套一层 HITL 审批卡
-_HITL_EXCLUDE = frozenset({"escalate_to_human_cs"})
+_HITL_EXCLUDE = frozenset({"escalate_to_human_cs", "submit_expert_report"})
 
 
-def _all_tool_names() -> frozenset[str]:
-    return frozenset(item.name for item in TOOL_DEFINITIONS)
+def all_tool_definitions() -> list:
+    return [*TOOL_DEFINITIONS, *DISPATCH_DEFINITIONS, SUBMIT_REPORT_DEFINITION]
 
 
 def resolve_execution_context(ctx: ExecutionContext | None = None) -> ExecutionContext:
-    """解析执行上下文：显式传入 > contextvar > 默认全权限。"""
+    """解析执行上下文：显式传入 > contextvar > 当前角色默认白名单。"""
     if ctx is not None:
         return ctx
     current = get_execution_context()
     if current is not None:
         return current
-    return build_default_context(allowed_tools=_all_tool_names())
+    profile = current_profile()
+    return build_default_context(
+        allowed_tools=profile.tools,
+        permissions=profile.permissions,
+    )
 
 
 def _to_langchain_tool(definition: ToolDefinition) -> StructuredTool:
@@ -63,7 +70,7 @@ def get_agent_tools(ctx: ExecutionContext | None = None) -> list[StructuredTool]
     resolved = resolve_execution_context(ctx)
     return [
         _to_langchain_tool(item)
-        for item in TOOL_DEFINITIONS
+        for item in all_tool_definitions()
         if is_tool_allowed(item, resolved)
     ]
 
@@ -73,7 +80,7 @@ def list_tool_schemas(ctx: ExecutionContext | None = None) -> list[dict[str, Any
     resolved = resolve_execution_context(ctx)
     return [
         item.to_model_tool()
-        for item in TOOL_DEFINITIONS
+        for item in all_tool_definitions()
         if is_tool_allowed(item, resolved)
     ]
 
@@ -93,7 +100,7 @@ def hitl_interrupt_on() -> dict[str, dict[str, Any]]:
             "allowed_decisions": ["approve", "reject"],
             "description": _hitl_description_factory,
         }
-        for item in TOOL_DEFINITIONS
+        for item in all_tool_definitions()
         if requires_hitl(item)
     }
 

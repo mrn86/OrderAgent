@@ -35,6 +35,35 @@ def check_rate_limit(
     key = token or "anonymous"
     now = time.monotonic()
 
+    from app.core.redis_client import get_redis
+
+    client = get_redis(for_stream=True)
+    if client is not None:
+        rkey = f"oa:rl:{key}"
+        count = int(client.incr(rkey))
+        if count == 1:
+            client.expire(rkey, int(window_seconds))
+        if count > limit:
+            ttl = int(client.ttl(rkey) or window_seconds)
+            retry_after = max(1, ttl)
+            emit_gateway_audit(
+                path=request.url.path,
+                method=request.method,
+                auth_ok=True,
+                token=token,
+                gateway_rate_limited=True,
+                retry_after=retry_after,
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                model_fallback=None,
+                model_rate_limited=None,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"请求过于频繁，每分钟最多 {limit} 次",
+                headers={"Retry-After": str(retry_after)},
+            )
+        return token
+
     with _lock:
         bucket = _hits[key]
         _prune(bucket, now, window_seconds)

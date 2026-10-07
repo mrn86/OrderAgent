@@ -27,6 +27,14 @@ from langgraph.types import Command
 
 from app.core.agent.compression import ContextCompressionMiddleware
 from app.core.agent.loop_guard import ToolLoopGuardMiddleware
+from app.core.agent.profiles import (
+    DISPATCH_INVOICE,
+    DISPATCH_LOGISTICS,
+    DISPATCH_ORDER,
+    ROLE_ROUTER,
+    current_profile,
+)
+from app.core.agent.user_reply import user_visible_message
 from app.core.agent.graph_runtime import (
     OrderAgentState,
     bind_runtime,
@@ -60,7 +68,7 @@ from app.core.audit import (
     start_agent_audit,
 )
 from app.core.context import ensure_conversation, touch_conversation
-from app.gateway.prompts import PROMPT_KEY_AGENT_SYSTEM, get_enabled_prompt
+from app.gateway.prompts import get_enabled_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +77,7 @@ def build_agent(ctx: ExecutionContext | None = None):
     """创建带 checkpointer + 上下文压缩 + HITL 的 Agent 图。"""
     llm = build_llm()
     tools = get_agent_tools(ctx)
-    prompt = get_enabled_prompt(PROMPT_KEY_AGENT_SYSTEM)
+    prompt = get_enabled_prompt(current_profile().prompt_key)
     interrupt_on = hitl_interrupt_on()
     middleware = [ContextCompressionMiddleware(), ToolLoopGuardMiddleware()]
     if interrupt_on:
@@ -101,7 +109,7 @@ def _bind_ctx_trace(base_ctx: ExecutionContext) -> ExecutionContext:
 
 
 def _start_turn_audit(base_ctx: ExecutionContext):
-    prompt = get_enabled_prompt(PROMPT_KEY_AGENT_SYSTEM)
+    prompt = get_enabled_prompt(current_profile().prompt_key)
     return start_agent_audit(
         user_id=base_ctx.user_id,
         conversation_id=base_ctx.conversation_id or None,
@@ -169,6 +177,129 @@ def _serialize_tool_io(value: Any) -> Any:
         return json.loads(str(value))
     except Exception:
         return str(value)
+
+
+_DISPATCH_TOOLS = frozenset({DISPATCH_ORDER, DISPATCH_LOGISTICS, DISPATCH_INVOICE})
+_DISPATCH_STATUS_TEXT = {
+    DISPATCH_ORDER: "订单专家查询中…",
+    DISPATCH_LOGISTICS: "物流专家查询中…",
+    DISPATCH_INVOICE: "发票专家查询中…",
+}
+
+
+def _as_dict_payload(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _extract_conclusion_text(text: str) -> str | None:
+    """若答复是带 conclusion 的 JSON（或夹带 JSON），抽出对用户可读结论。"""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    direct = _as_dict_payload(raw)
+    if isinstance(direct, dict):
+        for key in ("conclusion", "answer"):
+            val = direct.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        report = direct.get("report")
+        if isinstance(report, dict) and isinstance(report.get("conclusion"), str):
+            c = report["conclusion"].strip()
+            if c:
+                return c
+    # 尝试从文本中截取第一个 JSON 对象
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        nested = _as_dict_payload(raw[start : end + 1])
+        if nested:
+            got = _extract_conclusion_text(json.dumps(nested, ensure_ascii=False))
+            if got:
+                return got
+    return None
+
+
+def _looks_like_structured_dump(text: str) -> bool:
+    raw = (text or "").strip()
+    if not raw.startswith("{") and not raw.startswith("```"):
+        return False
+    markers = (
+        '"evidence"',
+        '"result_hash"',
+        '"commands"',
+        '"verified"',
+        '"taskId"',
+        '"report"',
+        '"needSupplement"',
+    )
+    return any(m in raw for m in markers) or ('"conclusion"' in raw and raw.lstrip().startswith("{"))
+
+
+def _display_answer(raw: str, *, dispatch_conclusions: list[str] | None = None) -> str:
+    """用户可见答复：优先 conclusion；结构化垃圾则回退派发结论。"""
+    text = (raw or "").strip()
+    extracted = _extract_conclusion_text(text)
+    if extracted and (_looks_like_structured_dump(text) or text.startswith("{")):
+        return extracted
+    if extracted and len(extracted) < len(text) and _looks_like_structured_dump(text):
+        return extracted
+    conclusions = [c.strip() for c in (dispatch_conclusions or []) if isinstance(c, str) and c.strip()]
+    if (not text or _looks_like_structured_dump(text)) and conclusions:
+        if len(conclusions) == 1:
+            return conclusions[0]
+        return "\n\n".join(f"**结论 {i}**：{c}" for i, c in enumerate(conclusions, 1))
+    if extracted and not text:
+        return extracted
+    return text
+
+
+def _finalize_client_answer(
+    raw: str,
+    *,
+    dispatch_conclusions: list[str] | None = None,
+) -> str:
+    """对用户通道：路由强制 RouterUserReply schema；专家侧仍用展示清洗。"""
+    fallbacks = [c for c in (dispatch_conclusions or []) if isinstance(c, str) and c.strip()]
+    if current_profile().role == ROLE_ROUTER:
+        # output schema 门禁：只输出 message，丢弃 confidence 等额外键
+        return user_visible_message(raw, fallbacks=fallbacks)
+    return _display_answer(raw, dispatch_conclusions=fallbacks)
+
+
+def _client_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """前端步骤仅保留工具名，不含 input/observation 原始结构。"""
+    out: list[dict[str, Any]] = []
+    for step in steps or []:
+        name = step.get("tool")
+        if not name:
+            continue
+        out.append({"tool": name})
+    return out
+
+
+def _collect_dispatch_conclusions(steps: list[dict[str, Any]]) -> list[str]:
+    found: list[str] = []
+    for step in steps or []:
+        if step.get("tool") not in _DISPATCH_TOOLS:
+            continue
+        obs = _as_dict_payload(step.get("observation"))
+        if not obs:
+            continue
+        c = obs.get("conclusion")
+        if isinstance(c, str) and c.strip():
+            found.append(c.strip())
+    return found
 
 
 def _chunk_has_tool_calls(chunk: Any) -> bool:
@@ -315,9 +446,11 @@ def run_agent_loop(
     conversation_id: Optional[str] = None,
     *,
     execution_ctx: ExecutionContext | None = None,
+    thread_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """同步执行 AgentLoop，返回完整结果。"""
     cid = ensure_conversation(conversation_id)
+    tid = (thread_id or "").strip() or cid
     user_query = (query or "").strip()
     runtime_tokens = None
     token = None
@@ -333,10 +466,10 @@ def run_agent_loop(
         )
         audit_session, audit_token = _start_turn_audit(base_ctx)
         agent = build_agent(base_ctx)
-        runtime_tokens = bind_runtime(agent, cid)
+        runtime_tokens = bind_runtime(agent, tid)
         token = set_execution_context(base_ctx)
 
-        blocked = _pending_hitl(cid)
+        blocked = _pending_hitl(tid)
         if blocked is not None:
             _hitl, approval, answer = blocked
             touch_conversation(cid)
@@ -357,7 +490,7 @@ def run_agent_loop(
 
         out = agent.invoke(
             _turn_input(user_query),
-            config=thread_config(cid),
+            config=thread_config(tid),
             version="v2",
         )
         hitl = None
@@ -367,7 +500,7 @@ def run_agent_loop(
             if isinstance(value, dict):
                 hitl = value
         if hitl is None:
-            hitl = read_hitl_interrupt(cid)
+            hitl = read_hitl_interrupt(tid)
 
         if hitl is not None:
             approval = _approval_from_hitl(hitl, cid)
@@ -396,13 +529,16 @@ def run_agent_loop(
             steps=steps,
             answer=answer,
         )
+        answer = _finalize_client_answer(
+            answer, dispatch_conclusions=_collect_dispatch_conclusions(steps)
+        )
         touch_conversation(cid)
         _safe_finish_audit(audit_session, audit_token, status="done", model_result=answer)
         audit_token = None
         return {
             "query": user_query,
             "answer": answer,
-            "steps": steps,
+            "steps": _client_steps(steps),
             "humanCs": human_cs,
             "conversationId": cid,
         }
@@ -435,9 +571,11 @@ async def stream_agent_loop(
     conversation_id: Optional[str] = None,
     *,
     execution_ctx: ExecutionContext | None = None,
+    thread_id: Optional[str] = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """异步流式执行 AgentLoop，逐步 yield 事件字典。"""
     cid = ensure_conversation(conversation_id)
+    tid = (thread_id or "").strip() or cid
     user_query = (query or "").strip()
     runtime_tokens = None
     token = None
@@ -457,14 +595,16 @@ async def stream_agent_loop(
         )
         audit_session, audit_token = _start_turn_audit(base_ctx)
         agent = build_agent(base_ctx)
-        runtime_tokens = bind_runtime(agent, cid)
+        runtime_tokens = bind_runtime(agent, tid)
         token = set_execution_context(base_ctx)
 
         steps: list[dict[str, Any]] = []
         answer_parts: list[str] = []
         human_cs_emitted = False
+        extra_approval: dict[str, Any] | None = None
+        dispatch_conclusions: list[str] = []
 
-        blocked = _pending_hitl(cid)
+        blocked = _pending_hitl(tid)
         if blocked is not None:
             _hitl, approval, answer = blocked
             audit_status = "approval_required"
@@ -478,7 +618,7 @@ async def stream_agent_loop(
                 "type": "done",
                 "query": user_query,
                 "answer": answer,
-                "steps": steps,
+                "steps": [],
                 "humanCs": None,
                 "conversationId": cid,
                 **({"approvalRequired": approval} if approval else {}),
@@ -488,7 +628,7 @@ async def stream_agent_loop(
         try:
             async for event in agent.astream_events(
                 _turn_input(user_query),
-                config=thread_config(cid),
+                config=thread_config(tid),
                 version="v2",
             ):
                 kind = event.get("event")
@@ -507,7 +647,13 @@ async def stream_agent_loop(
                     tool_input = _serialize_tool_io(data.get("input"))
                     step = {"tool": name, "input": tool_input, "observation": None}
                     steps.append(step)
-                    yield {"type": "tool_start", "tool": name, "input": tool_input}
+                    # 前端不收工具入参原文
+                    yield {"type": "tool_start", "tool": name}
+                    if name in _DISPATCH_TOOLS:
+                        yield {
+                            "type": "status",
+                            "content": _DISPATCH_STATUS_TEXT.get(name, "专家查询中…"),
+                        }
 
                 elif kind == "on_tool_end":
                     observation = data.get("output")
@@ -518,17 +664,21 @@ async def stream_agent_loop(
                         if step.get("tool") == name and step.get("observation") is None:
                             step["observation"] = observation
                             break
-                    yield {"type": "tool_end", "tool": name, "observation": observation}
+                    # 前端不收 observation 原文
+                    yield {"type": "tool_end", "tool": name}
+                    if name in _DISPATCH_TOOLS:
+                        dispatch_obs = _as_dict_payload(observation)
+                        if dispatch_obs:
+                            conclusion = dispatch_obs.get("conclusion")
+                            if isinstance(conclusion, str) and conclusion.strip():
+                                dispatch_conclusions.append(conclusion.strip())
+                            appr = dispatch_obs.get("approvalRequired")
+                            if dispatch_obs.get("status") == "need_hitl" and isinstance(appr, dict):
+                                extra_approval = appr
+                                yield _approval_required_event(appr, cid)
+                        yield {"type": "status", "content": "正在整理答复…"}
                     if name == "escalate_to_human_cs":
-                        payload = observation if isinstance(observation, dict) else None
-                        if isinstance(observation, str):
-                            try:
-                                parsed = json.loads(observation)
-                                if isinstance(parsed, dict):
-                                    payload = parsed
-                            except Exception:
-                                payload = None
-                        payload = payload or build_human_cs_payload()
+                        payload = _as_dict_payload(observation) or build_human_cs_payload()
                         yield {"type": "human_cs", **payload}
                         human_cs_emitted = True
 
@@ -544,7 +694,7 @@ async def stream_agent_loop(
                     answer_parts.append(text)
                     yield {"type": "token", "content": text}
 
-            hitl = read_hitl_interrupt(cid)
+            hitl = read_hitl_interrupt(tid)
             if hitl is not None:
                 approval = _approval_from_hitl(hitl, cid)
                 answer = _pending_approval_answer((approval or {}).get("summary") or "")
@@ -559,7 +709,7 @@ async def stream_agent_loop(
                     "type": "done",
                     "query": user_query,
                     "answer": answer,
-                    "steps": steps,
+                    "steps": _client_steps(steps),
                     "humanCs": None,
                     "conversationId": cid,
                     **({"approvalRequired": approval} if approval else {}),
@@ -573,22 +723,34 @@ async def stream_agent_loop(
                 steps=steps,
                 answer=raw_answer,
             )
+            if not dispatch_conclusions:
+                dispatch_conclusions = _collect_dispatch_conclusions(steps)
+            display = _finalize_client_answer(
+                answer, dispatch_conclusions=dispatch_conclusions
+            )
+            if display != raw_answer:
+                yield {"type": "reset_answer"}
+                if display:
+                    yield {"type": "token", "content": display}
+            answer = display
             audit_answer = answer
 
+            if extra_approval:
+                audit_status = "approval_required"
+                touch_conversation(cid)
+                yield {
+                    "type": "done",
+                    "query": user_query,
+                    "answer": answer,
+                    "steps": _client_steps(steps),
+                    "humanCs": human_cs,
+                    "conversationId": cid,
+                    "approvalRequired": extra_approval,
+                }
+                return
             if human_cs and not already_escalated:
-                if answer != raw_answer:
-                    yield {"type": "reset_answer"}
-                    yield {"type": "token", "content": answer}
-                yield {
-                    "type": "tool_start",
-                    "tool": "escalate_to_human_cs",
-                    "input": {"reason": human_cs.get("reason")},
-                }
-                yield {
-                    "type": "tool_end",
-                    "tool": "escalate_to_human_cs",
-                    "observation": human_cs,
-                }
+                yield {"type": "tool_start", "tool": "escalate_to_human_cs"}
+                yield {"type": "tool_end", "tool": "escalate_to_human_cs"}
                 yield {"type": "human_cs", **human_cs}
                 human_cs_emitted = True
             elif human_cs and not human_cs_emitted:
@@ -599,13 +761,12 @@ async def stream_agent_loop(
                 "type": "done",
                 "query": user_query,
                 "answer": answer,
-                "steps": steps,
+                "steps": _client_steps(steps),
                 "humanCs": human_cs,
                 "conversationId": cid,
             }
         except Exception as exc:  # noqa: BLE001
-            # interrupt 可能以控制流异常冒泡；优先读 checkpoint
-            hitl = read_hitl_interrupt(cid)
+            hitl = read_hitl_interrupt(tid)
             if hitl is not None:
                 approval = _approval_from_hitl(hitl, cid)
                 answer = _pending_approval_answer((approval or {}).get("summary") or "")
@@ -620,7 +781,7 @@ async def stream_agent_loop(
                     "type": "done",
                     "query": user_query,
                     "answer": answer,
-                    "steps": steps,
+                    "steps": _client_steps(steps),
                     "humanCs": None,
                     "conversationId": cid,
                     **({"approvalRequired": approval} if approval else {}),
@@ -651,9 +812,11 @@ def resume_agent_after_decision(
     decision: str,
     *,
     execution_ctx: ExecutionContext | None = None,
+    thread_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """对挂起的 HITL interrupt 执行 approve/reject，并跑完剩余图。"""
     cid = ensure_conversation(conversation_id)
+    tid = (thread_id or "").strip() or cid
     action = (decision or "").strip().lower()
     if action not in {"approve", "reject"}:
         return {"error": {"code": 400, "message": "decision 必须是 approve 或 reject"}}
@@ -664,8 +827,8 @@ def resume_agent_after_decision(
     audit_token = None
     try:
         hitl_probe_agent = build_agent()
-        runtime_tokens = bind_runtime(hitl_probe_agent, cid)
-        hitl = read_hitl_interrupt(cid)
+        runtime_tokens = bind_runtime(hitl_probe_agent, tid)
+        hitl = read_hitl_interrupt(tid)
         if hitl is None:
             return {"error": {"code": 404, "message": "当前会话没有待审批操作"}}
 
@@ -684,7 +847,7 @@ def resume_agent_after_decision(
         audit_session, audit_token = _start_turn_audit(base_ctx)
         agent = build_agent(base_ctx)
         reset_runtime(*runtime_tokens)
-        runtime_tokens = bind_runtime(agent, cid)
+        runtime_tokens = bind_runtime(agent, tid)
         token = set_execution_context(base_ctx)
 
         if action == "reject":
@@ -701,11 +864,11 @@ def resume_agent_after_decision(
 
         out = agent.invoke(
             Command(resume=resume_payload),
-            config=thread_config(cid),
+            config=thread_config(tid),
             version="v2",
         )
         # 仍挂起则视为异常
-        if getattr(out, "interrupts", None) or read_hitl_interrupt(cid):
+        if getattr(out, "interrupts", None) or read_hitl_interrupt(tid):
             _safe_finish_audit(
                 audit_session, audit_token, status="error", model_result="审批后仍有未完成的中断"
             )
@@ -717,6 +880,9 @@ def resume_agent_after_decision(
         steps, answer = _messages_to_steps_answer(messages)
         if action == "reject" and not (answer or "").strip():
             answer = "已取消该高风险操作，未执行。"
+        answer = _finalize_client_answer(
+            answer, dispatch_conclusions=_collect_dispatch_conclusions(steps)
+        )
         touch_conversation(cid)
         _safe_finish_audit(audit_session, audit_token, status="done", model_result=answer)
         audit_token = None
@@ -724,7 +890,7 @@ def resume_agent_after_decision(
             "decision": action,
             "query": f"[审批{'通过' if action == 'approve' else '拒绝'}]",
             "answer": answer,
-            "steps": steps,
+            "steps": _client_steps(steps),
             "humanCs": None,
             "conversationId": cid,
             "requestId": cid,

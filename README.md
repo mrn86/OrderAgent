@@ -1,27 +1,44 @@
 # Order Agent
 
-订单智能助手 monorepo，包含两个独立子项目：
+订单智能助手 monorepo：路由 + 订单/物流/发票专家（独立进程，Redis Stream 总线）。
 
 | 目录 | 说明 |
 |------|------|
-| [`backend/`](./backend) | LangChain Agent + FastAPI 后端 |
-| [`web/`](./web) | Vue 3 对话前端 |
+| [`packages/agent-common`](./packages/agent-common) | 共享库（`backend/app`） |
+| [`apps/router-agent`](./apps/router-agent) | 对用户 HTTP/SSE、编排与复核 |
+| [`apps/order-expert`](./apps/order-expert) | 订单/售后/退款专家 worker |
+| [`apps/logistics-expert`](./apps/logistics-expert) | 物流轨迹/运单专家 worker |
+| [`apps/invoice-expert`](./apps/invoice-expert) | 发票专家 worker |
+| [`web/`](./web) | Vue 3 对话前端（只打路由网关） |
+
+专家互不通信；只向路由回传 ExpertReport。需要 Redis 5+（任务总线与 SSE）。
 
 ## 快速启动
 
+四个进程：
+
 ```bash
-# 后端（仓库根目录）
+# 1. 路由
 cd backend
-python -m venv .venv
 # Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt   # 首次
+set AGENT_ROLE=router
+set AGENT_ID=router-agent
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 
-# 前端（另开终端，仓库根目录）
-cd web
-npm install                       # 首次
-npm run dev
+# 2. 订单专家
+set AGENT_ROLE=order
+set AGENT_ID=order-expert
+uvicorn app.expert_app:app --host 127.0.0.1 --port 8001
+
+# 3. 物流专家
+set AGENT_ROLE=logistics
+set AGENT_ID=logistics-expert
+uvicorn app.expert_app:app --host 127.0.0.1 --port 8003
+
+# 4. 发票专家
+set AGENT_ROLE=invoice
+set AGENT_ID=invoice-expert
+uvicorn app.expert_app:app --host 127.0.0.1 --port 8002
 ```
 
-浏览器打开：http://127.0.0.1:5173
+前端：`cd web && npm run dev` → http://127.0.0.1:5173

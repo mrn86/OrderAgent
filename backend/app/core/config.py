@@ -16,8 +16,14 @@ class Settings(BaseSettings):
     access_token: str = "test-token"
 
     # 审计：Agent 标识与 token/结果落盘策略
-    agent_id: str = "order-agent"
-    agent_name: str = "订单智能助手"
+    agent_id: str = "router-agent"
+    agent_name: str = "路由智能助手"
+    # router | order | invoice — 三进程各自设置
+    agent_role: str = "router"
+    task_ttl_seconds: int = 1800
+    expert_task_timeout_ms: int = 120000
+    dispatch_stream_maxlen: int = 10000
+    task_pending_idle_ms: int = 60000
     audit_token_budget: int = 100000
     audit_model_result_max_chars: int = 2000
 

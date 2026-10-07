@@ -15,11 +15,14 @@ _async_client = None
 _memory_cache: dict[str, str] = {}
 
 
-def get_redis():
-    """同步客户端：假数据模式或连不上时返回 None（走内存缓存）。"""
+def get_redis(*, for_stream: bool = False):
+    """同步客户端。
+
+    for_stream=True 时不因 use_fake_data 禁用（任务总线 / SSE 依赖 Stream）。
+    """
     global _client
     settings = get_settings()
-    if settings.use_fake_data:
+    if settings.use_fake_data and not for_stream:
         return None
     if _client is None:
         try:

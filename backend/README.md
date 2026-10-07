@@ -1,6 +1,14 @@
 # Order Agent Backend
 
-LangChain Agent + FastAPI + PostgreSQL + Redis + Python 后端。
+LangChain 多 Agent：路由 + 订单/物流/发票专家，共享本目录 `app` 包。
+
+- 路由：`AGENT_ROLE=router` → `app.main:app`（用户 API / SSE）
+- 订单专家：`AGENT_ROLE=order` → `app.expert_app:app`
+- 物流专家：`AGENT_ROLE=logistics` → `app.expert_app:app`
+- 发票专家：`AGENT_ROLE=invoice` → `app.expert_app:app`
+
+进程间仅 Redis Stream：`oa:dispatch:{expert}` / `oa:task:{taskId}:events` / `oa:task:{taskId}:control`。
+
 
 分层：
 
@@ -71,9 +79,9 @@ curl -X POST http://127.0.0.1:8000/v1/agent/chat \
 
 | 类型 | 值 |
 |------|----|
-| 订单号 | `2026092012345678` |
-| 订单 ID | `O20260920001` |
+| 订单号（运输中 + 退货中） | `2026092012345678` / `O20260920001` |
+| 售后单（退货退款进行中） | `AS20260925001` |
+| 订单号（已完成 + 仅退款成功） | `2026091508765432` / `O20260915008` |
+| 售后单 / 退款单 | `AS20260918008` / `RF20260929001` |
 | 运单号 | `SF1234567890` |
-| 售后单 | `AS20260925001` |
-| 退款单 | `RF20260929001` |
 | 发票 | `INV20260929001` |

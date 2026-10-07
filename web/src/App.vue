@@ -122,23 +122,16 @@ async function send() {
         current.content = ''
         current.statusText = '正在查询…'
       } else if (event.type === 'tool_start') {
-        current.statusText = `调用工具：${event.tool || 'tool'}`
-        current.steps = [
-          ...(current.steps || []),
-          { tool: event.tool, input: event.input, observation: null },
-        ]
+        const tool = event.tool || ''
+        if (tool === 'dispatch_order_expert') current.statusText = '订单专家查询中…'
+        else if (tool === 'dispatch_logistics_expert') current.statusText = '物流专家查询中…'
+        else if (tool === 'dispatch_invoice_expert') current.statusText = '发票专家查询中…'
+        else if (tool === 'escalate_to_human_cs') current.statusText = '准备转人工…'
+        else current.statusText = '正在处理…'
+        current.steps = [...(current.steps || []), { tool }]
       } else if (event.type === 'tool_end') {
-        current.statusText = `工具完成：${event.tool || 'tool'}`
-        const steps = [...(current.steps || [])]
-        for (let i = steps.length - 1; i >= 0; i -= 1) {
-          if (steps[i].tool === event.tool && steps[i].observation == null) {
-            steps[i] = { ...steps[i], observation: event.observation }
-            break
-          }
-        }
-        current.steps = steps
-        if (event.tool === 'escalate_to_human_cs') {
-          applyHumanCs(current, parseHumanCsPayload(event.observation) || extractHumanCsFromSteps(steps))
+        if (!current.statusText || current.statusText.startsWith('正在') || current.statusText.includes('查询')) {
+          current.statusText = '正在整理答复…'
         }
       } else if (event.type === 'approval_required') {
         applyApproval(current, event)
@@ -290,15 +283,6 @@ onMounted(scrollBottom)
                 前往{{ msg.humanCs.csName || '人工客服' }}
               </a>
             </div>
-            <details v-if="msg.steps?.length" class="steps" :open="msg.streaming">
-              <summary>工具调用 {{ msg.steps.length }} 步</summary>
-              <ul>
-                <li v-for="(step, idx) in msg.steps" :key="idx">
-                  <strong>{{ step.tool || 'tool' }}</strong>
-                  <code>{{ JSON.stringify(step.input) }}</code>
-                </li>
-              </ul>
-            </details>
           </div>
         </article>
       </section>

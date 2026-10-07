@@ -30,6 +30,10 @@ BUSINESS_TOOLS = {
     "get_invoice",
     "list_invoices_by_order",
     "create_invoice_download_urls",
+    "dispatch_order_expert",
+    "dispatch_logistics_expert",
+    "dispatch_invoice_expert",
+    "submit_expert_report",
 }
 
 # 模型答复中「无法处理」类表述，用于结束后强制兜底

@@ -15,9 +15,11 @@ from app.core.audit.session import (
     reset_agent_audit,
     start_agent_audit,
 )
+from app.core.audit.task import emit_agent_task
 
 __all__ = [
     "AgentAuditSession",
+    "emit_agent_task",
     "emit_gateway_audit",
     "redact_text",
     "redact_value",

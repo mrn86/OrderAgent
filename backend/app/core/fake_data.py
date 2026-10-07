@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
+import json
 
 ORDER = {
     "orderId": "O20260920001",
@@ -142,7 +143,11 @@ ORDER_2 = {
         "latestTraceAt": "2026-09-18T15:30:00+08:00",
         "eta": None,
     },
-    "afterSaleSummary": {"hasAfterSale": False, "activeCount": 0, "latestAfterSaleId": None},
+    "afterSaleSummary": {
+        "hasAfterSale": True,
+        "activeCount": 0,
+        "latestAfterSaleId": "AS20260918008",
+    },
     "invoiceSummary": {
         "eligible": True,
         "invoiced": False,
@@ -151,6 +156,232 @@ ORDER_2 = {
     },
     "remark": {"buyerRemark": None, "merchantRemark": None},
 }
+
+# 额外假订单：5 种状态 × 5 = 25，状态均匀分布（保留上方 ORDER / ORDER_2 供物流/售后/发票样例关联）
+_ORDER_STATUS_CYCLE: list[tuple[str, str]] = [
+    ("PAID", "待发货"),
+    ("SHIPPING", "运输中"),
+    ("DELIVERED", "已送达"),
+    ("COMPLETED", "交易完成"),
+    ("CANCELLED", "已取消"),
+]
+
+_EXTRA_PRODUCTS: list[dict[str, Any]] = [
+    {"skuId": "SKU-7101", "spuId": "SPU-3001", "spuName": "运动短裤", "skuAttrs": "蓝色 / L", "unitPrice": 12900},
+    {"skuId": "SKU-7102", "spuId": "SPU-3002", "spuName": "速干T恤", "skuAttrs": "白色 / M", "unitPrice": 9900},
+    {"skuId": "SKU-7103", "spuId": "SPU-3003", "spuName": "跑步袜套装", "skuAttrs": "混色 / 均码", "unitPrice": 5900},
+    {"skuId": "SKU-7104", "spuId": "SPU-3004", "spuName": "健身护腕", "skuAttrs": "黑色 / 一对", "unitPrice": 7900},
+    {"skuId": "SKU-7105", "spuId": "SPU-3005", "spuName": "瑜伽垫", "skuAttrs": "紫色 / 6mm", "unitPrice": 15900},
+    {"skuId": "SKU-7106", "spuId": "SPU-3006", "spuName": "运动水杯", "skuAttrs": "灰色 / 700ml", "unitPrice": 8900},
+    {"skuId": "SKU-7107", "spuId": "SPU-3007", "spuName": "压缩裤", "skuAttrs": "黑色 / XL", "unitPrice": 19900},
+    {"skuId": "SKU-7108", "spuId": "SPU-3008", "spuName": "羽毛球拍", "skuAttrs": "碳纤维 / 4U", "unitPrice": 28900},
+    {"skuId": "SKU-7109", "spuId": "SPU-3009", "spuName": "网球", "skuAttrs": "黄色 / 3只装", "unitPrice": 6900},
+    {"skuId": "SKU-7110", "spuId": "SPU-3010", "spuName": "泳镜", "skuAttrs": "透明 / 均码", "unitPrice": 11900},
+    {"skuId": "SKU-7111", "spuId": "SPU-3011", "spuName": "登山杖", "skuAttrs": "银色 / 可调节", "unitPrice": 16900},
+    {"skuId": "SKU-7112", "spuId": "SPU-3012", "spuName": "骑行手套", "skuAttrs": "红色 / M", "unitPrice": 8500},
+    {"skuId": "SKU-7113", "spuId": "SPU-3013", "spuName": "运动腰包", "skuAttrs": "黑色 / 单袋", "unitPrice": 7500},
+    {"skuId": "SKU-7114", "spuId": "SPU-3014", "spuName": "跳绳", "skuAttrs": "钢丝绳 / 可调", "unitPrice": 4500},
+    {"skuId": "SKU-7115", "spuId": "SPU-3015", "spuName": "力量带", "skuAttrs": "中等阻力", "unitPrice": 6500},
+    {"skuId": "SKU-7116", "spuId": "SPU-3016", "spuName": "篮球", "skuAttrs": "7号 / 室内", "unitPrice": 14900},
+    {"skuId": "SKU-7117", "spuId": "SPU-3017", "spuName": "足球", "skuAttrs": "5号 / 训练", "unitPrice": 13900},
+    {"skuId": "SKU-7118", "spuId": "SPU-3018", "spuName": "运动帽", "skuAttrs": "藏青色 / 均码", "unitPrice": 7900},
+    {"skuId": "SKU-7119", "spuId": "SPU-3019", "spuName": "防晒袖套", "skuAttrs": "灰色 / 一对", "unitPrice": 4900},
+    {"skuId": "SKU-7120", "spuId": "SPU-3020", "spuName": "运动毛巾", "skuAttrs": "白色 / 中号", "unitPrice": 3900},
+    {"skuId": "SKU-7121", "spuId": "SPU-3021", "spuName": "护膝", "skuAttrs": "黑色 / L", "unitPrice": 10900},
+    {"skuId": "SKU-7122", "spuId": "SPU-3022", "spuName": "哑铃套装", "skuAttrs": "2kg×2", "unitPrice": 21900},
+    {"skuId": "SKU-7123", "spuId": "SPU-3023", "spuName": "泡沫轴", "skuAttrs": "蓝色 / 45cm", "unitPrice": 9900},
+    {"skuId": "SKU-7124", "spuId": "SPU-3024", "spuName": "计步手环", "skuAttrs": "黑色 / 标准版", "unitPrice": 25900},
+    {"skuId": "SKU-7125", "spuId": "SPU-3025", "spuName": "运动背包", "skuAttrs": "迷彩 / 20L", "unitPrice": 18900},
+]
+
+_EXTRA_CITIES: list[tuple[str, str, str, str]] = [
+    ("上海市", "上海市", "浦东新区", "世纪大道****"),
+    ("北京市", "北京市", "朝阳区", "建国路****"),
+    ("广东省", "深圳市", "南山区", "科技园****"),
+    ("浙江省", "杭州市", "西湖区", "文三路****"),
+    ("江苏省", "南京市", "鼓楼区", "中山路****"),
+]
+
+_EXPRESS: list[tuple[str, str]] = [
+    ("顺丰速运", "SF"),
+    ("圆通速递", "YT"),
+    ("中通快递", "ZT"),
+    ("韵达快递", "YD"),
+    ("京东物流", "JD"),
+]
+
+
+def _build_extra_orders(count: int = 25) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for i in range(count):
+        status, status_text = _ORDER_STATUS_CYCLE[i % len(_ORDER_STATUS_CYCLE)]
+        product = _EXTRA_PRODUCTS[i % len(_EXTRA_PRODUCTS)]
+        province, city, district, address = _EXTRA_CITIES[i % len(_EXTRA_CITIES)]
+        express_name, express_code = _EXPRESS[i % len(_EXPRESS)]
+        day = 1 + (i % 28)
+        seq = i + 1
+        order_id = f"O202610{day:02d}{seq:03d}"
+        order_no = f"202610{day:02d}{10000000 + seq}"
+        created = f"2026-10-{day:02d}T10:{i % 60:02d}:00+08:00"
+        # 已取消统一为「未付款取消」：无支付、实付 0；其余状态均有支付时间
+        paid = (
+            None
+            if status == "CANCELLED"
+            else f"2026-10-{day:02d}T10:{min(i % 60 + 1, 59):02d}:00+08:00"
+        )
+        qty = 1 + (i % 2)
+        unit = int(product["unitPrice"])
+        goods = unit * qty
+        discount = 500 if i % 3 == 0 else 0
+        freight = 0 if goods >= 9900 else 800
+        pay = goods + freight - discount
+        shipped = None
+        completed = None
+        cancelled = None
+        logistics: dict[str, Any] | None
+        after_sale = {"hasAfterSale": False, "activeCount": 0, "latestAfterSaleId": None}
+        invoice = {"eligible": True, "invoiced": False, "invoiceId": None, "status": None}
+
+        if status == "PAID":
+            logistics = {
+                "packageCount": 0,
+                "expressCompany": None,
+                "trackingNo": None,
+                "status": "PENDING_SHIP",
+                "statusText": "待发货",
+                "latestTrace": None,
+                "latestTraceAt": None,
+                "eta": None,
+            }
+        elif status == "SHIPPING":
+            shipped = f"2026-10-{min(day + 1, 28):02d}T09:00:00+08:00"
+            logistics = {
+                "packageCount": 1,
+                "expressCompany": express_name,
+                "trackingNo": f"{express_code}{8800000000 + seq}",
+                "status": "IN_TRANSIT",
+                "statusText": "运输中",
+                "latestTrace": f"快件已到达【{city}转运中心】",
+                "latestTraceAt": f"2026-10-{min(day + 2, 28):02d}T18:00:00+08:00",
+                "eta": {
+                    "predictArriveAt": f"2026-10-{min(day + 3, 28):02d}T18:00:00+08:00",
+                    "predictArriveWindow": {
+                        "earliest": f"2026-10-{min(day + 3, 28):02d}T14:00:00+08:00",
+                        "latest": f"2026-10-{min(day + 3, 28):02d}T20:00:00+08:00",
+                    },
+                    "confidence": 0.8,
+                    "delayRisk": "LOW",
+                    "isOverdue": False,
+                },
+            }
+        elif status == "DELIVERED":
+            shipped = f"2026-10-{min(day + 1, 28):02d}T09:00:00+08:00"
+            logistics = {
+                "packageCount": 1,
+                "expressCompany": express_name,
+                "trackingNo": f"{express_code}{8800000000 + seq}",
+                "status": "DELIVERED",
+                "statusText": "已送达",
+                "latestTrace": "快件已送达，待确认收货",
+                "latestTraceAt": f"2026-10-{min(day + 3, 28):02d}T16:00:00+08:00",
+                "eta": None,
+            }
+        elif status == "COMPLETED":
+            shipped = f"2026-10-{min(day + 1, 28):02d}T09:00:00+08:00"
+            completed = f"2026-10-{min(day + 4, 28):02d}T15:00:00+08:00"
+            logistics = {
+                "packageCount": 1,
+                "expressCompany": express_name,
+                "trackingNo": f"{express_code}{8800000000 + seq}",
+                "status": "SIGNED",
+                "statusText": "已签收",
+                "latestTrace": "快件已签收",
+                "latestTraceAt": f"2026-10-{min(day + 3, 28):02d}T15:30:00+08:00",
+                "eta": None,
+            }
+            if i % 5 == 3:
+                invoice = {
+                    "eligible": True,
+                    "invoiced": True,
+                    "invoiceId": f"INV202610{day:02d}{seq:03d}",
+                    "status": "ISSUED",
+                }
+        else:  # CANCELLED — 未付款取消，实付口径统一为 0
+            cancelled = f"2026-10-{day:02d}T12:00:00+08:00"
+            logistics = {
+                "packageCount": 0,
+                "expressCompany": None,
+                "trackingNo": None,
+                "status": "CANCELLED",
+                "statusText": "已取消",
+                "latestTrace": None,
+                "latestTraceAt": None,
+                "eta": None,
+            }
+            invoice = {"eligible": False, "invoiced": False, "invoiceId": None, "status": None}
+
+        pay_channel = "WECHAT" if i % 2 == 0 else "ALIPAY"
+        rows.append(
+            {
+                "orderId": order_id,
+                "orderNo": order_no,
+                "status": status,
+                "statusText": status_text,
+                "createdAt": created,
+                "paidAt": paid,
+                "shippedAt": shipped,
+                "completedAt": completed,
+                "cancelledAt": cancelled,
+                "buyer": {"userId": "U10086", "nicknameMask": "宁*"},
+                "amounts": {
+                    "goodsAmount": goods,
+                    "freightAmount": freight,
+                    "discountAmount": discount,
+                    "payAmount": pay if paid else 0,
+                    "currency": "CNY",
+                },
+                "payment": {
+                    "payChannel": pay_channel if paid else None,
+                    "payChannelText": ("微信支付" if pay_channel == "WECHAT" else "支付宝") if paid else None,
+                    "transactionNo": f"{pay_channel.lower()}{202610000000 + seq}" if paid else None,
+                    "paidAt": paid,
+                },
+                "items": [
+                    {
+                        "orderItemId": f"OI-E{seq}",
+                        "skuId": product["skuId"],
+                        "spuId": product["spuId"],
+                        "spuName": product["spuName"],
+                        "skuAttrs": product["skuAttrs"],
+                        "quantity": qty,
+                        "unitPrice": unit,
+                        "payPrice": unit * qty - discount,
+                        "imageUrl": f"https://cdn.example.com/sku/{product['skuId'].split('-')[-1]}.jpg",
+                        "afterSaleStatus": None,
+                    }
+                ],
+                "receiver": {
+                    "nameMask": "张*",
+                    "mobileMask": "138****0000",
+                    "province": province,
+                    "city": city,
+                    "district": district,
+                    "addressMask": address,
+                },
+                "merchant": {"merchantId": "M10001", "merchantName": "运动旗舰店"},
+                "logisticsSummary": logistics,
+                "afterSaleSummary": after_sale,
+                "invoiceSummary": invoice,
+                "remark": {
+                    "buyerRemark": "请尽快发货" if status == "PAID" else None,
+                    "merchantRemark": None,
+                },
+            }
+        )
+    return rows
+
+
+EXTRA_ORDERS = _build_extra_orders(25)
 
 LOGISTICS = {
     "orderId": "O20260920001",
@@ -301,30 +532,113 @@ AFTER_SALE = {
     "rejectInfo": None,
 }
 
+# 完成态「仅退款」售后：挂在已完成订单 ORDER_2，与 REFUND 同售后单号，避免与运输中订单的退货单冲突
+AFTER_SALE_COMPLETED = {
+    "afterSaleId": "AS20260918008",
+    "orderId": "O20260915008",
+    "orderNo": "2026091508765432",
+    "type": "REFUND_ONLY",
+    "typeText": "仅退款",
+    "status": "COMPLETED",
+    "statusText": "已完成",
+    "reasonCode": "NOT_WANT",
+    "reasonText": "不想要了",
+    "applyAmount": 45900,
+    "refundAmount": 45900,
+    "currency": "CNY",
+    "createdAt": "2026-09-18T18:00:00+08:00",
+    "updatedAt": "2026-09-18T18:20:00+08:00",
+    "items": [
+        {
+            "orderItemId": "OI-2",
+            "skuId": "SKU-6601",
+            "spuName": "篮球鞋",
+            "quantity": 1,
+        }
+    ],
+    "progress": {
+        "currentStep": "COMPLETED",
+        "percent": 100,
+        "steps": [
+            {
+                "step": "APPLIED",
+                "stepText": "提交申请",
+                "status": "DONE",
+                "time": "2026-09-18T18:00:00+08:00",
+                "desc": "已提交仅退款申请",
+            },
+            {
+                "step": "MERCHANT_APPROVED",
+                "stepText": "商家审核",
+                "status": "DONE",
+                "time": "2026-09-18T18:05:00+08:00",
+                "desc": "商家已同意退款",
+            },
+            {
+                "step": "REFUND_PROCESSING",
+                "stepText": "退款处理",
+                "status": "DONE",
+                "time": "2026-09-18T18:06:00+08:00",
+                "desc": "已发起支付渠道退款",
+            },
+            {
+                "step": "COMPLETED",
+                "stepText": "完成",
+                "status": "DONE",
+                "time": "2026-09-18T18:20:00+08:00",
+                "desc": "退款已到账",
+            },
+        ],
+    },
+    "returnLogistics": None,
+    "refund": {
+        "refundId": "RF20260929001",
+        "refundAmount": 45900,
+        "refundStatus": "SUCCESS",
+        "refundChannel": "WECHAT",
+        "refundArriveAt": "2026-09-18T18:20:00+08:00",
+        "refundArriveExpectAt": "2026-09-19T18:00:00+08:00",
+    },
+    "sla": {
+        "nextActionOwner": None,
+        "nextActionText": "售后已完成",
+        "expectFinishAt": "2026-09-18T18:20:00+08:00",
+    },
+    "timeline": [
+        {
+            "time": "2026-09-18T18:20:00+08:00",
+            "event": "COMPLETED",
+            "title": "退款完成",
+            "detail": "退款单 RF20260929001",
+        }
+    ],
+    "rejectInfo": None,
+}
+
 REFUND = {
     "refundId": "RF20260929001",
-    "afterSaleId": "AS20260929010",
-    "orderId": "O20260920001",
-    "orderNo": "2026092012345678",
+    "afterSaleId": "AS20260918008",
+    "orderId": "O20260915008",
+    "orderNo": "2026091508765432",
     "type": "REFUND_ONLY",
     "typeText": "仅退款",
     "status": "SUCCESS",
     "statusText": "退款成功",
-    "refundAmount": 29900,
+    "refundAmount": 45900,
     "currency": "CNY",
-    "payChannel": "WECHAT",
-    "payChannelText": "原路退回微信",
-    "transactionNo": "5020260929xxxxxxx",
+    "payChannel": "ALIPAY",
+    "payChannelText": "原路退回支付宝",
+    "transactionNo": "20260918xxxxxxx",
     "reasonCode": "NOT_WANT",
     "reasonText": "不想要了",
-    "remark": "未发货，申请仅退款",
+    "remark": "签收后申请仅退款（与商家协商免退货）",
     "items": [
         {
-            "orderItemId": "OI-1",
-            "skuId": "SKU-8899",
-            "spuName": "轻跑运动鞋",
+            "orderItemId": "OI-2",
+            "skuId": "SKU-6601",
+            "spuName": "篮球鞋",
             "quantity": 1,
-            "refundAmount": 29900,
+            "refundAmount": 45900,
         }
     ],
     "progress": {
@@ -335,39 +649,39 @@ REFUND = {
                 "step": "APPLIED",
                 "stepText": "提交申请",
                 "status": "DONE",
-                "time": "2026-09-29T11:00:00+08:00",
+                "time": "2026-09-18T18:00:00+08:00",
                 "desc": "已提交仅退款申请",
             },
             {
                 "step": "MERCHANT_APPROVED",
                 "stepText": "商家审核",
                 "status": "DONE",
-                "time": "2026-09-29T11:02:00+08:00",
+                "time": "2026-09-18T18:05:00+08:00",
                 "desc": "商家已同意退款",
             },
             {
                 "step": "REFUNDING",
                 "stepText": "退款执行中",
                 "status": "DONE",
-                "time": "2026-09-29T11:03:00+08:00",
+                "time": "2026-09-18T18:06:00+08:00",
                 "desc": "已发起支付渠道退款",
             },
             {
                 "step": "ARRIVED",
                 "stepText": "到账完成",
                 "status": "DONE",
-                "time": "2026-09-29T11:18:00+08:00",
-                "desc": "退款已原路退回微信",
+                "time": "2026-09-18T18:20:00+08:00",
+                "desc": "退款已原路退回支付宝",
             },
         ],
     },
-    "appliedAt": "2026-09-29T11:00:00+08:00",
-    "approvedAt": "2026-09-29T11:02:00+08:00",
-    "refundingAt": "2026-09-29T11:03:00+08:00",
-    "expectArriveAt": "2026-09-30T11:00:00+08:00",
-    "arrivedAt": "2026-09-29T11:18:00+08:00",
+    "appliedAt": "2026-09-18T18:00:00+08:00",
+    "approvedAt": "2026-09-18T18:05:00+08:00",
+    "refundingAt": "2026-09-18T18:06:00+08:00",
+    "expectArriveAt": "2026-09-19T18:00:00+08:00",
+    "arrivedAt": "2026-09-18T18:20:00+08:00",
     "failReason": None,
-    "updatedAt": "2026-09-29T11:18:00+08:00",
+    "updatedAt": "2026-09-18T18:20:00+08:00",
 }
 
 INVOICE = {
@@ -385,7 +699,6 @@ INVOICE = {
         "titleType": "ENTERPRISE",
         "titleName": "某某科技有限公司",
         "taxNo": "91310000MA1XXXXXX",
-        "email": "finance@example.com",
     },
     "invoiceCode": "04400xxxxxx",
     "invoiceNumber": "12345678",
@@ -440,12 +753,6 @@ INVOICE = {
                 "status": "DONE",
                 "time": "2026-09-29T10:18:00+08:00",
             },
-            {
-                "step": "PUSHED",
-                "stepText": "已发送邮箱",
-                "status": "DONE",
-                "time": "2026-09-29T10:18:05+08:00",
-            },
         ],
     },
     "failReason": None,
@@ -457,7 +764,7 @@ def _clone(obj: Any) -> Any:
 
 
 def all_orders() -> list[dict[str, Any]]:
-    return [_clone(ORDER), _clone(ORDER_2)]
+    return [_clone(ORDER), _clone(ORDER_2)] + [_clone(o) for o in EXTRA_ORDERS]
 
 
 def get_order_by_id(order_id: str) -> dict[str, Any] | None:
@@ -550,7 +857,7 @@ def get_tracking(tracking_no: str, company_code: str | None = None) -> dict[str,
 
 
 def all_after_sales() -> list[dict[str, Any]]:
-    return [_clone(AFTER_SALE)]
+    return [_clone(AFTER_SALE), _clone(AFTER_SALE_COMPLETED)]
 
 
 def get_after_sale(after_sale_id: str) -> dict[str, Any] | None:
@@ -561,7 +868,36 @@ def get_after_sale(after_sale_id: str) -> dict[str, Any] | None:
 
 
 def all_refunds() -> list[dict[str, Any]]:
-    return [_clone(REFUND)] + [_clone(item) for item in _CREATED_REFUNDS]
+    return [_clone(REFUND)] + _load_created_refunds()
+
+
+def _load_created_refunds() -> list[dict[str, Any]]:
+    from app.core.redis_client import get_redis
+
+    client = get_redis(for_stream=True)
+    if client is not None:
+        raw = client.get("oa:fake:created_refunds")
+        if raw:
+            try:
+                data = json.loads(raw)
+                if isinstance(data, list):
+                    return [_clone(item) for item in data if isinstance(item, dict)]
+            except Exception:
+                pass
+        return []
+    return [_clone(item) for item in _CREATED_REFUNDS]
+
+
+def _persist_created_refund(created: dict[str, Any]) -> None:
+    from app.core.redis_client import get_redis
+
+    client = get_redis(for_stream=True)
+    if client is None:
+        _CREATED_REFUNDS.append(created)
+        return
+    rows = _load_created_refunds()
+    rows.append(created)
+    client.setex("oa:fake:created_refunds", 2 * 60 * 60, json.dumps(rows, ensure_ascii=False))
 
 
 def get_refund(refund_id: str) -> dict[str, Any] | None:
@@ -712,7 +1048,7 @@ def create_refund(
         "failReason": None,
         "updatedAt": now,
     }
-    _CREATED_REFUNDS.append(created)
+    _persist_created_refund(created)
     return _clone(created)
 
 

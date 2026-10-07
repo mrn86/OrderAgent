@@ -34,7 +34,7 @@ from langchain_core.messages.utils import count_tokens_approximately
 
 from app.core.agent.graph_runtime import OrderAgentState, read_hitl_interrupt
 from app.core.agent.tools.governance import Effect
-from app.core.agent.tools.registry import TOOL_DEFINITIONS
+from app.core.agent.tools.registry import TOOL_DEFINITIONS, slim_invoice_for_agent
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -530,6 +530,11 @@ def _transform_kept(
         if isinstance(data, dict) and _is_error_payload(data):
             out.append(replace_tool_content(msg, short_error(data)))
             continue
+        if name == "get_invoice" and isinstance(data, dict):
+            # 旧线程可能仍含 email /「已发送邮箱」；送模前再剥一次
+            slim = slim_invoice_for_agent(data)
+            out.append(replace_tool_content(msg, json.dumps(slim, ensure_ascii=False)))
+            continue
         if isinstance(data, dict) and _is_list_payload(data) and name:
             if last_list_idx.get(name) == idx:
                 slim = slim_list_payload(data)
@@ -791,7 +796,8 @@ class ContextCompressionMiddleware(AgentMiddleware[OrderAgentState]):
                         prepared = request.override(messages=trim_view, system_message=system)
             if prepared is None:
                 prepared = request.override(messages=kept, system_message=system)
-        prepared = prepared.override(messages=sanitize_tool_pairs(list(prepared.messages or [])))
+        prepared_msgs = _strip_invoice_email_tool_messages(list(prepared.messages or []))
+        prepared = prepared.override(messages=sanitize_tool_pairs(prepared_msgs))
         if _tool_rounds_this_turn(messages) >= get_settings().agent_max_tool_rounds:
             prepared = _force_text_only(prepared)
         return prepared
@@ -811,6 +817,22 @@ class ContextCompressionMiddleware(AgentMiddleware[OrderAgentState]):
     ) -> ModelResponse:
         """异步路径（astream）：与 wrap_model_call 同一套 _prepare。"""
         return await handler(self._prepare(request))
+
+
+def _strip_invoice_email_tool_messages(messages: list[AnyMessage]) -> list[AnyMessage]:
+    """无论是否压缩，历史 get_invoice 结果送模前剥离 email / 发信进度。"""
+    out: list[AnyMessage] = []
+    for msg in messages:
+        if not isinstance(msg, ToolMessage) or _tool_name(msg) != "get_invoice":
+            out.append(msg)
+            continue
+        data = _parse_json(_text(msg.content))
+        if not isinstance(data, dict):
+            out.append(msg)
+            continue
+        slim = slim_invoice_for_agent(data)
+        out.append(replace_tool_content(msg, json.dumps(slim, ensure_ascii=False)))
+    return out
 
 
 def _tool_rounds_this_turn(messages: Sequence[AnyMessage]) -> int:
