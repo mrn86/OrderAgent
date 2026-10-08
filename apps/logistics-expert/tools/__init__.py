@@ -1,5 +1,3 @@
-"""物流专家自有工具。"""
+from tools.definitions import LOGISTICS_MCP_SPECS, register_logistics_tools
 
-from tools.definitions import LOGISTICS_TOOL_DEFINITIONS, register_logistics_tools
-
-__all__ = ["LOGISTICS_TOOL_DEFINITIONS", "register_logistics_tools"]
+__all__ = ["LOGISTICS_MCP_SPECS", "register_logistics_tools"]

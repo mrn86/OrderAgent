@@ -11,7 +11,7 @@ from app.core.agent.profiles import current_profile, expert_thread_id, install_p
 from app.core.agent.protocol import ExpertReport, canonical_hash, report_from_answer
 from app.core.agent.verify import verify_report
 from app.core.audit.task import build_agent_task_record
-from app.service import fake_data
+from app.core.agent.tools.mcp_client import set_mcp_tool_caller
 
 _APPS = Path(__file__).resolve().parents[2] / "apps"
 
@@ -164,21 +164,37 @@ def test_verify_detects_missing_and_hash_mismatch():
     assert verdict.ok is False
     assert verdict.need_review or any("无法复核" in i for i in verdict.issues)
 
-    order = fake_data.get_order_by_id("O20261002002")
-    good = ExpertReport(
-        conclusion="ok",
-        evidence=[
-            {
-                "source": "order_id",
-                "id": "O20261002002",
-                "result_hash": canonical_hash(order),
-            }
-        ],
-        confidence=0.9,
-        commands=[{"tool": "get_order_detail", "args": {}, "result_hash": "x"}],
-    )
-    ok = verify_report(good)
-    assert ok.ok is True
+    mcp_root = Path(__file__).resolve().parents[2] / "mcpserver"
+    if str(mcp_root) not in sys.path:
+        sys.path.insert(0, str(mcp_root))
+    from data import fake_data as mcp_fake_data
+
+    order = mcp_fake_data.get_order_by_id("O20261002002")
+    assert order is not None
+
+    def _mcp_get(name: str, arguments: dict):
+        if name == "get_order_detail" and arguments.get("order_id") == "O20261002002":
+            return order
+        return {"error": {"code": 404, "message": "not found"}}
+
+    set_mcp_tool_caller(_mcp_get)
+    try:
+        good = ExpertReport(
+            conclusion="ok",
+            evidence=[
+                {
+                    "source": "order_id",
+                    "id": "O20261002002",
+                    "result_hash": canonical_hash(order),
+                }
+            ],
+            confidence=0.9,
+            commands=[{"tool": "get_order_detail", "args": {}, "result_hash": "x"}],
+        )
+        ok = verify_report(good)
+        assert ok.ok is True
+    finally:
+        set_mcp_tool_caller(None)
 
 
 def test_verify_low_confidence_needs_supplement():

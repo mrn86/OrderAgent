@@ -70,6 +70,9 @@ class Settings(BaseSettings):
 
     human_cs_url: str = "http://www.baidu.com"
 
+    # 业务 MCP Server（专家工具经此调用；Streamable HTTP）
+    mcp_server_url: str = "http://127.0.0.1:8010/mcp"
+
     def expert_a2a_url_map(self) -> dict[str, str]:
         """专家名 → A2A 基址。JSON 覆盖优先，否则回退三个兼容字段。"""
         raw = (self.expert_a2a_urls_json or "").strip()

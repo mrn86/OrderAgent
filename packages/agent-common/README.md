@@ -1,6 +1,6 @@
 # agent-common
 
-四进程共享库：`backend/app`（loop、工具治理、审计、业务 service）。A2A 传输在各 app 内。
+共享库：`backend/app`（loop、工具治理、MCP 客户端、审计、业务 service）。A2A 传输在各 app 内；业务工具经根目录 `mcpserver`。
 
 ```bash
 pip install -e packages/agent-common

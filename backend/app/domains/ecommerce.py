@@ -11,8 +11,10 @@ from typing import Any
 
 from app.core.agent import domain_registry as registry
 from app.core.agent.tools.registry import slim_invoice_for_agent
-from app.service import fake_data
+from app.service import after_sales as after_sale_service
 from app.service import invoices as invoice_service
+from app.service import logistics as logistics_service
+from app.service import orders as order_service
 from app.service import refunds as refund_service
 
 _PACK_ID = "ecommerce"
@@ -153,28 +155,34 @@ def prefer_order_list_reply(raw: str, conclusions: list[str] | None) -> str:
     return listing
 
 
+def _ok_payload(data: Any) -> Any | None:
+    if not isinstance(data, dict) or data.get("error"):
+        return None
+    return data
+
+
 def _fetch_order_id(rid: str) -> Any | None:
-    return fake_data.get_order_by_id(rid)
+    return _ok_payload(order_service.get_order_detail(order_id=rid))
 
 
 def _fetch_order_no(rid: str) -> Any | None:
-    return fake_data.get_order_by_no(rid)
+    return _ok_payload(order_service.get_order_detail(order_no=rid))
 
 
 def _fetch_invoice(rid: str) -> Any | None:
-    return fake_data.get_invoice(rid) or invoice_service.get_invoice(rid)
+    return _ok_payload(invoice_service.get_invoice(rid))
 
 
 def _fetch_refund(rid: str) -> Any | None:
-    return fake_data.get_refund(rid) or refund_service.get_refund_detail(rid)
+    return _ok_payload(refund_service.get_refund_detail(rid))
 
 
 def _fetch_after_sale(rid: str) -> Any | None:
-    return fake_data.get_after_sale(rid)
+    return _ok_payload(after_sale_service.get_after_sale_detail(rid))
 
 
 def _fetch_logistics(rid: str) -> Any | None:
-    return fake_data.get_logistics_by_order_no(rid)
+    return _ok_payload(logistics_service.get_by_order_no(rid))
 
 
 def register_ecommerce_domain() -> None:

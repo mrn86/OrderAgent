@@ -1,25 +1,28 @@
 # Order Agent Backend
 
-LangChain 多 Agent：路由 + 订单/物流/发票专家，共享本目录 `app` 包。
+LangChain 多 Agent：路由 + 订单/物流/发票专家，共享本目录 `app` 包；业务工具经根目录 `mcpserver`（MCP）。
 
-- 路由：`apps/router-agent` → `uvicorn main:app`（派发工具在该进程内创建）
-- 订单专家：`apps/order-expert` → `uvicorn main:app`（订单工具在该进程内创建）
-- 物流专家：`apps/logistics-expert` → `uvicorn main:app`（物流工具在该进程内创建）
-- 发票专家：`apps/invoice-expert` → `uvicorn main:app`（发票工具在该进程内创建）
+- MCP：`mcpserver` → `python main.py`（默认 `http://127.0.0.1:8010/mcp`）
+- 路由：`apps/router-agent` → `uvicorn main:app`（派发工具在该进程内安装）
+- 订单专家：`apps/order-expert` → `uvicorn main:app`（业务 handler 经 MCP）
+- 物流专家：`apps/logistics-expert` → `uvicorn main:app`（业务 handler 经 MCP）
+- 发票专家：`apps/invoice-expert` → `uvicorn main:app`（业务 handler 经 MCP）
 
 进程间派发走 A2A（各 app 自己的 Client/Server）；HITL 经专家 `POST /v1/a2a/resume`。
-Redis 仅保留 SSE / 任务 meta / conversation↔task HITL 映射。
+专家启动时 MCP `list_tools` 发现并装配业务工具，调用走 MCP；Redis 仅保留 SSE / 任务 meta / conversation↔task HITL 映射。
 
 
 分层：
 
-- `app/api`：FastAPI 路由
-- `app/service`：业务逻辑
-- `app/core`：配置、假数据、Redis/PG、AgentLoop/Tools
+- `app/api`：FastAPI 路由（经 `app.service` → MCP）
+- `app/service`：业务 MCP 适配器（假数据在 `mcpserver/data`）
+- `app/core`：配置、Redis/PG、AgentLoop/Tools（含 `mcp_client`）
 
 配套前端：`../web`（Vue3）。
 
-> 默认 `USE_FAKE_DATA=true`，业务查询可不依赖真实库。  
+> 业务假数据在 `../mcpserver/data/fake_data.py`；访问前须先启动 MCP。  
+> 默认 `USE_FAKE_DATA=true` 仍控制 DB/Redis 旁路行为。  
+
 > **系统提示词**默认内容在各 `apps/*/prompts`；存储层仍为 `app/gateway/prompts`（PostgreSQL `system_prompts`，库不可用时回退内存）。各进程启动时只种子自己的 key。  
 > 若本机尚无库：`python scripts/create_db.py`
 
@@ -37,7 +40,12 @@ pip install -r requirements.txt
 
 ## 2. 启动 API
 
+先启动 MCP（专家依赖），再启动路由：
+
 ```bash
+cd ../mcpserver
+python main.py
+
 cd ../apps/router-agent
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```

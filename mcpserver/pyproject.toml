@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "order-agent-mcpserver"
+version = "1.5.0"
+description = "MCP server exposing order/logistics/invoice business tools"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=2.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.9.0",
+]
+
+[project.scripts]
+order-agent-mcp = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "server", "path_setup"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tools*", "data*", "service*", "schemas*"]
