@@ -1,4 +1,4 @@
-"""路由 ↔ 专家 Redis 总线信封与 ExpertReport。专家之间无通道。"""
+"""路由 ↔ 专家总线信封与 ExpertReport。专家之间无通道。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-ExpertName = Literal["order", "logistics", "invoice"]
+from app.core.agent.domain_registry import conclusion_from_list_steps
+
+# 历史别名：合法专家名由路由进程 / env 配置约束，不再用 Literal 写死三专家
+ExpertName = str
 TaskMode = Literal["execute", "supplement", "review"]
 ReportStatus = Literal["done", "failed", "need_hitl", "need_more_info"]
 EventType = Literal["progress", "approval_required", "report", "failed"]
@@ -89,53 +92,12 @@ class ControlMessage(BaseModel):
     conversation_id: str = ""
 
 
-def _step_observation(step: dict[str, Any]) -> Any:
-    obs = step.get("observation")
-    if isinstance(obs, str):
-        try:
-            return json.loads(obs)
-        except Exception:
-            return obs
-    return obs
-
-
 def conclusion_from_query_orders_steps(steps: list[dict[str, Any]] | None) -> str | None:
-    """若已成功调用 query_orders，从列表结果生成可对用户展示的结论（兜底）。"""
-    for step in reversed(steps or []):
-        if str(step.get("tool") or "") != "query_orders":
-            continue
-        obs = _step_observation(step)
-        if not isinstance(obs, dict) or obs.get("error"):
-            continue
-        rows = obs.get("list")
-        if not isinstance(rows, list):
-            continue
-        total = int(obs.get("total") if obs.get("total") is not None else len(rows))
-        if total == 0 and not rows:
-            return "未查询到订单。"
-        lines: list[str] = [f"共查到 {total} 笔订单（本页 {len(rows)} 笔）："]
-        for idx, row in enumerate(rows[:20], 1):
-            if not isinstance(row, dict):
-                continue
-            pay = row.get("payAmount")
-            if isinstance(pay, (int, float)):
-                amount = f"{pay / 100:.2f} 元"
-            else:
-                amount = "—"
-            names = row.get("itemNames") or []
-            if isinstance(names, list) and names:
-                goods = "、".join(str(n) for n in names[:3] if n)
-            else:
-                goods = "—"
-            lines.append(
-                f"{idx}. 订单号 {row.get('orderNo') or '—'}｜"
-                f"{row.get('statusText') or row.get('status') or '—'}｜"
-                f"实付 {amount}｜{goods}"
-            )
-        if total > len(rows):
-            lines.append("（还有更多，可说明要看第几页或按状态筛选。）")
-        return "\n".join(lines)
-    return None
+    """兼容旧名：委托已注册的列表结论 formatter（电商域安装 query_orders）。"""
+    from app.domains.ecommerce import ensure_ecommerce_domain
+
+    ensure_ecommerce_domain()
+    return conclusion_from_list_steps(steps)
 
 
 def report_from_answer(
@@ -146,9 +108,12 @@ def report_from_answer(
     steps: list[dict[str, Any]] | None = None,
 ) -> ExpertReport:
     """优先解析 JSON；否则把自由文本降级包装为低置信度报告。"""
+    from app.domains.ecommerce import ensure_ecommerce_domain
+
+    ensure_ecommerce_domain()
     text = (answer or "").strip()
     cmds = commands_from_steps(steps or [])
-    list_conclusion = conclusion_from_query_orders_steps(steps)
+    list_conclusion = conclusion_from_list_steps(steps)
     parsed = _extract_json_object(text)
     if parsed:
         try:
@@ -193,8 +158,11 @@ def upgrade_report_with_list_steps(
     report: ExpertReport,
     steps: list[dict[str, Any]] | None,
 ) -> ExpertReport:
-    """query_orders 已成功时，结论固定为逐笔列表，不用模型汇总覆盖。"""
-    list_conclusion = conclusion_from_query_orders_steps(steps)
+    """列表类工具已成功时，结论固定为 formatter 输出，不用模型汇总覆盖。"""
+    from app.domains.ecommerce import ensure_ecommerce_domain
+
+    ensure_ecommerce_domain()
+    list_conclusion = conclusion_from_list_steps(steps)
     if not list_conclusion:
         return report
     if not report.commands:

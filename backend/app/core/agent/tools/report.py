@@ -21,7 +21,8 @@ SUBMIT_REPORT = "submit_expert_report"
 
 _last_report: ContextVar[ExpertReport | None] = ContextVar("expert_report", default=None)
 
-EvidenceSource = Literal["order_id", "order_no", "invoice_id", "refund_id", "after_sale_id"]
+# 证据源由各域自行约定；平台不再用 Literal 写死
+EvidenceSource = str
 
 
 class _ReportPart(StrictArgs):

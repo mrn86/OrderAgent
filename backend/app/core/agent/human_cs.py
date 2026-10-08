@@ -11,30 +11,12 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
+from app.core.agent.domain_registry import (
+    business_tools,
+    domain_markers,
+    human_cs_scope_blurb,
+)
 from app.core.config import get_settings
-
-# 业务查询类工具：调用过则通常视为「在能力范围内尝试过」
-BUSINESS_TOOLS = {
-    "query_orders",
-    "get_order_detail",
-    "get_order_by_no",
-    "get_logistics_by_order_no",
-    "get_logistics_tracking",
-    "list_after_sales",
-    "get_after_sale_detail",
-    "get_after_sale_progress",
-    "list_refunds",
-    "get_refund_detail",
-    "get_refund_progress",
-    "create_refund",
-    "get_invoice",
-    "list_invoices_by_order",
-    "create_invoice_download_urls",
-    "dispatch_order_expert",
-    "dispatch_logistics_expert",
-    "dispatch_invoice_expert",
-    "submit_expert_report",
-}
 
 # 模型答复中「无法处理」类表述，用于结束后强制兜底
 CANNOT_ANSWER_PATTERNS = [
@@ -47,17 +29,30 @@ CANNOT_ANSWER_PATTERNS = [
     r"转人工",
 ]
 
-# 业务域标记：用户话里出现则优先交给主 Agent，勿因空答误强制转人工
-_IN_DOMAIN_MARKERS = (
-    "订单",
-    "退款",
-    "退货",
-    "物流",
-    "运单",
-    "发票",
-    "售后",
-    "快递",
-)
+
+def _ensure_domain() -> None:
+    from app.domains.ecommerce import ensure_ecommerce_domain
+
+    ensure_ecommerce_domain()
+
+
+class _BusinessToolsProxy:
+    """保持 `tool in BUSINESS_TOOLS` 写法，内容来自 domain registry。"""
+
+    def __contains__(self, item: object) -> bool:
+        _ensure_domain()
+        return item in business_tools()
+
+    def __iter__(self):
+        _ensure_domain()
+        return iter(business_tools())
+
+    def __len__(self) -> int:
+        _ensure_domain()
+        return len(business_tools())
+
+
+BUSINESS_TOOLS = _BusinessToolsProxy()
 
 
 def build_human_cs_payload(reason: str = "当前问题无法自动处理") -> dict[str, Any]:
@@ -80,7 +75,9 @@ def has_escalate_step(steps: list[dict[str, Any]]) -> bool:
 
 def has_business_tool_step(steps: list[dict[str, Any]]) -> bool:
     """是否调用过任一业务查询工具。"""
-    return any(step.get("tool") in BUSINESS_TOOLS for step in steps or [])
+    _ensure_domain()
+    tools = business_tools()
+    return any(step.get("tool") in tools for step in steps or [])
 
 
 def answer_looks_unable(answer: str) -> bool:
@@ -92,8 +89,9 @@ def answer_looks_unable(answer: str) -> bool:
 
 
 def _query_looks_in_domain(query: str) -> bool:
+    _ensure_domain()
     text = query or ""
-    return any(marker in text for marker in _IN_DOMAIN_MARKERS)
+    return any(marker in text for marker in domain_markers())
 
 
 def should_force_human_cs(
@@ -122,9 +120,11 @@ def should_force_human_cs(
 
 def human_cs_fallback_answer(reason: str) -> str:
     """生成带 Markdown 客服链接的中文兜底回复。"""
+    _ensure_domain()
     payload = build_human_cs_payload(reason)
+    scope = human_cs_scope_blurb()
     return (
-        f"抱歉，我主要处理订单、物流、售后、退款和发票相关问题，"
+        f"抱歉，我主要处理{scope}，"
         f"{reason}。建议您联系人工客服获取帮助：[{payload['csName']}]({payload['csUrl']})"
     )
 

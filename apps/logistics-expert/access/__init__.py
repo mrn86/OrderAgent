@@ -5,7 +5,6 @@ from access.config import (
     PERMISSIONS,
     PERM_CS_ESCALATE,
     PERM_LOGISTICS_READ,
-    PERM_ORDER_READ,
     register_logistics_access,
 )
 
@@ -14,6 +13,5 @@ __all__ = [
     "PERMISSIONS",
     "PERM_CS_ESCALATE",
     "PERM_LOGISTICS_READ",
-    "PERM_ORDER_READ",
     "register_logistics_access",
 ]

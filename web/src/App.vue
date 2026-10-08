@@ -40,6 +40,10 @@ function applyApproval(current, payload) {
     summary: payload.summary || '',
     status: 'pending',
   }
+  // 气泡若已写入工程师向摘要，替换为业务文案
+  if (looksLikeApiSummary(current.content)) {
+    current.content = `${formatApprovalLabel(current.approval)}。请在下方确认是否批准执行。`
+  }
 }
 
 function formatApprovalArgs(args) {
@@ -50,6 +54,30 @@ function formatApprovalArgs(args) {
   return [order && `订单 ${order}`, amount && `金额 ${amount}`, reason && `原因「${reason}」`]
     .filter(Boolean)
     .join(' · ')
+}
+
+/** 是否像工程师向摘要（工具名 / 原始 JSON），不应直接展示给用户。 */
+function looksLikeApiSummary(text) {
+  const s = String(text || '')
+  return (
+    /参数\s*\{/.test(s) ||
+    /高风险写操作\s*[：:]/.test(s) ||
+    /\bcreate_refund\b/.test(s) ||
+    /["']order_no["']/.test(s)
+  )
+}
+
+/** 审批卡用户可见文案：优先业务字段，其次可读 summary。 */
+function formatApprovalLabel(approval) {
+  if (!approval) return '需要您确认是否执行该操作'
+  const detail = formatApprovalArgs(approval.args)
+  if (detail) {
+    const action = approval.tool === 'create_refund' ? '申请退款' : '高风险操作'
+    return `${action}：${detail}`
+  }
+  const summary = String(approval.summary || '').trim()
+  if (summary && !looksLikeApiSummary(summary)) return summary
+  return '需要您确认是否执行该操作'
 }
 
 async function onApprovalDecide(msg, decision) {
@@ -65,6 +93,14 @@ async function onApprovalDecide(msg, decision) {
     msg.approval = {
       ...msg.approval,
       status: decision === 'approve' ? 'approved' : 'rejected',
+    }
+    // 挂起时气泡正文常是「请确认是否批准」；审批后去掉待办语气，避免仍像未审
+    const pendingHint = /请在下方确认是否批准|待审批|高风险写操作|申请退款|高风险操作待确认/
+    if (typeof msg.content === 'string' && pendingHint.test(msg.content)) {
+      msg.content =
+        decision === 'approve'
+          ? '该操作已批准，执行结果见下方。'
+          : '已取消该操作，未执行。'
     }
     messages.value.push({
       id: `a-apv-${Date.now()}`,
@@ -159,7 +195,15 @@ async function send() {
         current.statusText = ''
         current.content = `${current.content || ''}${event.content || ''}`
       } else if (event.type === 'done') {
-        current.content = event.answer || current.content || '没有收到有效回复。'
+        let answer = event.answer || current.content || '没有收到有效回复。'
+        if (event.approvalRequired && looksLikeApiSummary(answer)) {
+          answer = `${formatApprovalLabel({
+            tool: event.approvalRequired.tool,
+            args: event.approvalRequired.args,
+            summary: event.approvalRequired.summary,
+          })}。请在下方确认是否批准执行。`
+        }
+        current.content = answer
         if (Array.isArray(event.steps) && event.steps.length) {
           current.steps = event.steps
         }
@@ -281,10 +325,36 @@ onMounted(scrollBottom)
                 </li>
               </ol>
             </details>
-            <div v-if="msg.approval" class="approval-card">
-              <p class="approval-title">高风险操作待审批</p>
-              <p class="approval-summary">{{ msg.approval.summary || formatApprovalArgs(msg.approval.args) }}</p>
-              <p v-if="msg.approval.tool" class="approval-meta">工具：{{ msg.approval.tool }}</p>
+            <div
+              v-if="msg.approval"
+              class="approval-card"
+              :class="{
+                decided: msg.approval.status !== 'pending',
+                approved: msg.approval.status === 'approved',
+                rejected: msg.approval.status === 'rejected',
+              }"
+            >
+              <p class="approval-title">
+                {{
+                  msg.approval.status === 'approved'
+                    ? '高风险操作已批准'
+                    : msg.approval.status === 'rejected'
+                      ? '高风险操作已拒绝'
+                      : '高风险操作待审批'
+                }}
+              </p>
+              <p
+                v-if="msg.approval.status === 'pending'"
+                class="approval-summary"
+              >
+                {{ formatApprovalLabel(msg.approval) }}
+              </p>
+              <p
+                v-else-if="formatApprovalLabel(msg.approval)"
+                class="approval-meta"
+              >
+                {{ formatApprovalLabel(msg.approval) }}
+              </p>
               <div v-if="msg.approval.status === 'pending'" class="approval-actions">
                 <button
                   type="button"
@@ -304,7 +374,7 @@ onMounted(scrollBottom)
                 </button>
               </div>
               <p v-else class="approval-status">
-                {{ msg.approval.status === 'approved' ? '已批准' : '已拒绝' }}
+                {{ msg.approval.status === 'approved' ? '已批准并继续执行' : '已拒绝，未执行' }}
               </p>
             </div>
             <div v-if="msg.humanCs?.csUrl" class="cs-card">
@@ -565,6 +635,20 @@ onMounted(scrollBottom)
   background: rgba(16, 35, 31, 0.04);
 }
 
+.approval-card.decided {
+  opacity: 0.92;
+}
+
+.approval-card.approved {
+  border-color: rgba(26, 122, 90, 0.35);
+  background: rgba(26, 122, 90, 0.06);
+}
+
+.approval-card.rejected {
+  border-color: rgba(140, 60, 50, 0.28);
+  background: rgba(140, 60, 50, 0.05);
+}
+
 .approval-title {
   margin: 0;
   font-weight: 700;
@@ -578,6 +662,10 @@ onMounted(scrollBottom)
   margin: 6px 0 0;
   color: var(--ink-soft);
   font-size: 13px;
+}
+
+.approval-card.decided .approval-meta {
+  font-size: 12px;
 }
 
 .approval-actions {

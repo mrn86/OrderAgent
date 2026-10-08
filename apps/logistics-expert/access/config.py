@@ -11,15 +11,12 @@ DEFAULT_AGENT_ID = "logistics-expert"
 DEFAULT_AGENT_NAME = "Logistics Expert"
 
 PERM_LOGISTICS_READ = "logistics:read"
-PERM_ORDER_READ = "order:read"
 PERM_CS_ESCALATE = "cs:escalate"
 
 ALLOWED_TOOLS: frozenset[str] = frozenset(
     {
         "get_logistics_by_order_no",
         "get_logistics_tracking",
-        "get_order_by_no",
-        "get_order_detail",
         "escalate_to_human_cs",
         SUBMIT_REPORT,
     }
@@ -28,7 +25,6 @@ ALLOWED_TOOLS: frozenset[str] = frozenset(
 PERMISSIONS: frozenset[str] = frozenset(
     {
         PERM_LOGISTICS_READ,
-        PERM_ORDER_READ,
         PERM_CS_ESCALATE,
     }
 )

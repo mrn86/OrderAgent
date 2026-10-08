@@ -16,12 +16,7 @@ def expert_base_url(*, expert: str | None = None, profile: AgentProfile | None =
     if settings.expert_a2a_public_url.strip():
         return settings.expert_a2a_public_url.rstrip("/")
     name = expert or (profile.expert_name if profile else None) or current_profile().expert_name or "order"
-    mapping = {
-        "order": settings.order_expert_a2a_url,
-        "logistics": settings.logistics_expert_a2a_url,
-        "invoice": settings.invoice_expert_a2a_url,
-    }
-    return mapping.get(name, settings.order_expert_a2a_url).rstrip("/")
+    return settings.expert_a2a_url(name)
 
 
 def build_expert_agent_card(profile: AgentProfile | None = None) -> AgentCard:

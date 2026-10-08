@@ -26,13 +26,7 @@ _executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="a2a-dispatch")
 
 
 def expert_base_url(expert: str) -> str:
-    settings = get_settings()
-    mapping = {
-        "order": settings.order_expert_a2a_url,
-        "logistics": settings.logistics_expert_a2a_url,
-        "invoice": settings.invoice_expert_a2a_url,
-    }
-    return mapping.get(expert, settings.order_expert_a2a_url).rstrip("/")
+    return get_settings().expert_a2a_url(expert)
 
 
 def _run_async(coro):  # type: ignore[no-untyped-def]

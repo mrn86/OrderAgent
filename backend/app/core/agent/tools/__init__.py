@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from langchain_core.tools import StructuredTool
@@ -106,15 +105,21 @@ def hitl_interrupt_on() -> dict[str, dict[str, Any]]:
 
 
 def format_hitl_summary(tool_name: str, arguments: dict[str, Any] | None = None) -> str:
-    """审批卡通用摘要。"""
+    """给用户看的审批摘要：业务语义，不含工具名与原始 JSON 参数。"""
     args = arguments or {}
-    if not args:
-        return f"高风险写操作：{tool_name}"
-    try:
-        args_text = json.dumps(args, ensure_ascii=False)
-    except Exception:
-        args_text = str(args)
-    return f"高风险写操作：{tool_name}，参数 {args_text}"
+    if tool_name == "create_refund":
+        parts: list[str] = []
+        order = args.get("order_no") or args.get("order_id")
+        if order:
+            parts.append(f"订单 {order}")
+        amount = args.get("amount")
+        if isinstance(amount, (int, float)):
+            parts.append(f"金额 {amount / 100:.2f} 元")
+        reason = str(args.get("reason") or "").strip()
+        if reason:
+            parts.append(f"原因「{reason}」")
+        return "申请退款" + (f"：{' · '.join(parts)}" if parts else "")
+    return "高风险操作待确认"
 
 
 def _hitl_description_factory(tool_call: dict[str, Any], state: Any, runtime: Any) -> str:

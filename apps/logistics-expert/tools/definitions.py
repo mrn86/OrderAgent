@@ -1,6 +1,7 @@
 """物流工具创建：参数契约、handler、ToolDefinition。
 
 只在物流专家进程内安装，不并入共享业务注册表。
+不安装订单查询工具，不调用 order service。
 """
 
 from __future__ import annotations
@@ -16,12 +17,10 @@ from app.core.agent.tools.governance import (
     ToolDefinition,
     ToolPolicy,
 )
-from access.config import PERM_CS_ESCALATE, PERM_LOGISTICS_READ, PERM_ORDER_READ
+from access.config import PERM_CS_ESCALATE, PERM_LOGISTICS_READ
 from app.core.config import get_settings
 from app.service import logistics as logistics_service
-from app.service import orders as order_service
 
-ORDER_ID_PATTERN = r"^O\d{8,}$"
 ORDER_NO_PATTERN = r"^\d{16}$"
 TRACKING_NO_PATTERN = r"^[A-Za-z0-9]{6,32}$"
 
@@ -38,7 +37,6 @@ def _read_policy(permission: str) -> ToolPolicy:
 
 
 LOGISTICS_READ_POLICY = _read_policy(PERM_LOGISTICS_READ)
-ORDER_READ_POLICY = _read_policy(PERM_ORDER_READ)
 ESCALATE_POLICY = ToolPolicy(
     effect=Effect.WRITE,
     risk=Risk.HIGH,
@@ -75,18 +73,6 @@ class GetLogisticsTrackingArgs(StrictArgs):
         return _empty_to_none(value)
 
 
-class GetOrderDetailArgs(StrictArgs):
-    """按内部订单 ID 查详情。"""
-
-    order_id: str = Field(pattern=ORDER_ID_PATTERN)
-
-
-class GetOrderByNoArgs(StrictArgs):
-    """按对外订单号查详情。"""
-
-    order_no: str = Field(pattern=ORDER_NO_PATTERN)
-
-
 class EscalateToHumanCsArgs(StrictArgs):
     """转人工：reason 写入前端 humanCs 载荷，供用户理解转接原因。"""
 
@@ -103,14 +89,6 @@ def _get_logistics_tracking(args: GetLogisticsTrackingArgs) -> dict[str, Any]:
         express_company_code=args.express_company_code,
         include_eta=args.include_eta,
     )
-
-
-def _get_order_detail(args: GetOrderDetailArgs) -> dict[str, Any]:
-    return order_service.get_order_detail(order_id=args.order_id)
-
-
-def _get_order_by_no(args: GetOrderByNoArgs) -> dict[str, Any]:
-    return order_service.get_order_detail(order_no=args.order_no)
 
 
 def _escalate_to_human_cs(args: EscalateToHumanCsArgs) -> dict[str, Any]:
@@ -138,20 +116,6 @@ LOGISTICS_TOOL_DEFINITIONS: list[ToolDefinition] = [
         parameters_model=GetLogisticsTrackingArgs,
         policy=LOGISTICS_READ_POLICY,
         handler=_get_logistics_tracking,  # type: ignore[arg-type]
-    ),
-    ToolDefinition(
-        name="get_order_by_no",
-        description="按对外订单号查询订单详情。",
-        parameters_model=GetOrderByNoArgs,
-        policy=ORDER_READ_POLICY,
-        handler=_get_order_by_no,  # type: ignore[arg-type]
-    ),
-    ToolDefinition(
-        name="get_order_detail",
-        description="按内部订单ID查询订单详情。",
-        parameters_model=GetOrderDetailArgs,
-        policy=ORDER_READ_POLICY,
-        handler=_get_order_detail,  # type: ignore[arg-type]
     ),
     ToolDefinition(
         name="escalate_to_human_cs",

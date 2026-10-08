@@ -241,12 +241,16 @@ def dispatch_expert(
             "needReview": verdict.need_review,
         }
         if _retry_depth < 1 and (verdict.need_supplement or verdict.need_review):
+            from app.core.agent.domain_registry import supplement_instruction_extra
+
             next_mode = "review" if verdict.need_review else "supplement"
+            issues = "；".join(verdict.issues)
+            hint = supplement_instruction_extra()
             extra = (
                 "路由复核发现问题，请用业务工具补证据并重新 submit_expert_report："
-                + "；".join(verdict.issues)
-                + "。不要引用其他专家的结论作为证据；"
-                "不要向用户索要手机号/账号；「查看全部订单」应直接 query_orders。"
+                + issues
+                + "。"
+                + hint
             )
             follow_slim = dispatch_expert(
                 expert=expert,

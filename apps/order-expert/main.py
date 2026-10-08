@@ -23,10 +23,12 @@ from app.core.config import get_settings  # noqa: E402
 
 get_settings.cache_clear()
 
+from app.domains.ecommerce import register_ecommerce_domain  # noqa: E402
 from access import register_order_access  # noqa: E402
 from prompts import register_order_prompts  # noqa: E402
 from tools import register_order_tools  # noqa: E402
 
+register_ecommerce_domain()
 register_order_access()
 register_order_prompts()
 register_order_tools()

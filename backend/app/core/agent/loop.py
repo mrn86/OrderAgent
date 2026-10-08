@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import replace
 from typing import Any, AsyncIterator, Iterator, Optional
 
@@ -256,39 +255,13 @@ def _display_answer(raw: str, *, dispatch_conclusions: list[str] | None = None) 
     return text
 
 
-def _is_order_list_text(text: str) -> bool:
-    body = (text or "").strip()
-    if body == "未查询到订单。":
-        return True
-    first = body.splitlines()[0] if body else ""
-    return first.startswith("共查到 ") and "订单号" in body
-
-
-def _reply_keeps_order_lines(raw: str, listing: str) -> bool:
-    """路由答复是否已经带上列表里的每一笔订单号。"""
-    numbers = re.findall(r"订单号\s+([^\s｜|，,]+)", listing)
-    if not numbers:
-        return listing.strip() in (raw or "")
-    return all(num.rstrip("｜|") in (raw or "") for num in numbers)
-
-
 def _prefer_order_list_reply(raw: str, conclusions: list[str] | None) -> str:
-    """订单列表已被派发结论写好时，不用路由模型的汇总替换逐笔列表。"""
-    text = (raw or "").strip()
-    lists = [c.strip() for c in (conclusions or []) if isinstance(c, str) and _is_order_list_text(c)]
-    if not lists:
-        return text
-    listing = lists[-1]
-    if _reply_keeps_order_lines(text, listing):
-        return text
-    others = [
-        c.strip()
-        for c in (conclusions or [])
-        if isinstance(c, str) and c.strip() and c.strip() not in lists
-    ]
-    if others:
-        return listing + "\n\n" + "\n\n".join(others)
-    return listing
+    """兼容旧名：委托已注册的 prefer_reply hooks（电商域安装订单列表策略）。"""
+    from app.core.agent.domain_registry import prefer_user_reply
+    from app.domains.ecommerce import ensure_ecommerce_domain
+
+    ensure_ecommerce_domain()
+    return prefer_user_reply(raw, conclusions)
 
 
 def _finalize_client_answer(

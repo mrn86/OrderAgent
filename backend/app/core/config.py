@@ -1,4 +1,6 @@
+import json
 from functools import lru_cache
+from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -59,12 +61,47 @@ class Settings(BaseSettings):
     use_fake_data: bool = True
 
     # 专家 A2A 基址（路由进程派发用；专家进程自身 public URL 用于 AgentCard）
+    # 兼容旧 env；优先使用 expert_a2a_urls_json（{"order":"http://..."}）
     order_expert_a2a_url: str = "http://127.0.0.1:8001"
     logistics_expert_a2a_url: str = "http://127.0.0.1:8003"
     invoice_expert_a2a_url: str = "http://127.0.0.1:8002"
+    expert_a2a_urls_json: str = ""
     expert_a2a_public_url: str = ""
 
     human_cs_url: str = "http://www.baidu.com"
+
+    def expert_a2a_url_map(self) -> dict[str, str]:
+        """专家名 → A2A 基址。JSON 覆盖优先，否则回退三个兼容字段。"""
+        raw = (self.expert_a2a_urls_json or "").strip()
+        if raw:
+            try:
+                data: Any = json.loads(raw)
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict):
+                out = {
+                    str(k).strip(): str(v).rstrip("/")
+                    for k, v in data.items()
+                    if str(k).strip() and str(v).strip()
+                }
+                if out:
+                    return out
+        return {
+            "order": self.order_expert_a2a_url.rstrip("/"),
+            "logistics": self.logistics_expert_a2a_url.rstrip("/"),
+            "invoice": self.invoice_expert_a2a_url.rstrip("/"),
+        }
+
+    def expert_a2a_url(self, expert: str) -> str:
+        mapping = self.expert_a2a_url_map()
+        name = (expert or "").strip()
+        if name and name in mapping:
+            return mapping[name]
+        if "order" in mapping:
+            return mapping["order"]
+        if mapping:
+            return next(iter(mapping.values()))
+        return self.order_expert_a2a_url.rstrip("/")
 
     # 上下文压缩：估窗阈值；keep 按用户轮而非消息条数
     context_compress_max_messages: int = 40

@@ -23,11 +23,13 @@ from app.core.config import get_settings  # noqa: E402
 
 get_settings.cache_clear()
 
+from app.domains.ecommerce import register_ecommerce_domain  # noqa: E402
 from access import register_router_access  # noqa: E402
 from agent_a2a import install_router_a2a  # noqa: E402
 from prompts import register_router_prompts  # noqa: E402
 from tools import register_router_tools  # noqa: E402
 
+register_ecommerce_domain()
 register_router_access()
 install_router_a2a()
 register_router_prompts()

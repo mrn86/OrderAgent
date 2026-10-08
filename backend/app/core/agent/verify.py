@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.service import fake_data
+from app.core.agent.domain_registry import (
+    fetch_live_record,
+    is_list_evidence_source,
+    list_tools,
+)
 from app.core.agent.protocol import ExpertReport, canonical_hash
-from app.service import invoices as invoice_service
-from app.service import refunds as refund_service
 
 
 @dataclass
@@ -19,44 +21,22 @@ class VerifyResult:
     need_review: bool = False
 
 
-def _live_record(source: str, record_id: str) -> Any | None:
-    src = (source or "").strip().lower()
-    rid = (record_id or "").strip()
-    if not rid:
-        return None
-    if src in {"order", "order_id"}:
-        return fake_data.get_order_by_id(rid)
-    if src in {"order_no"}:
-        return fake_data.get_order_by_no(rid)
-    if src in {"invoice", "invoice_id"}:
-        return fake_data.get_invoice(rid) or invoice_service.get_invoice(rid)
-    if src in {"refund", "refund_id"}:
-        return fake_data.get_refund(rid) or refund_service.get_refund_detail(rid)
-    if src in {"after_sale", "after_sale_id"}:
-        return fake_data.get_after_sale(rid)
-    if src in {"logistics", "tracking_no", "order_no_logistics"}:
-        return fake_data.get_logistics_by_order_no(rid)
-    return None
+def _ensure_domain() -> None:
+    from app.domains.ecommerce import ensure_ecommerce_domain
 
-
-_LIST_TOOLS = frozenset(
-    {
-        "query_orders",
-        "list_after_sales",
-        "list_refunds",
-        "list_invoices_by_order",
-    }
-)
+    ensure_ecommerce_domain()
 
 
 def _has_successful_list_command(report: ExpertReport) -> bool:
+    allowed = list_tools()
     for cmd in report.commands or []:
-        if cmd.tool in _LIST_TOOLS and cmd.ok:
+        if cmd.tool in allowed and cmd.ok:
             return True
     return False
 
 
 def verify_report(report: ExpertReport, *, min_confidence: float = 0.55) -> VerifyResult:
+    _ensure_domain()
     issues: list[str] = []
     list_ok = _has_successful_list_command(report)
     if not (report.conclusion or "").strip():
@@ -69,16 +49,15 @@ def verify_report(report: ExpertReport, *, min_confidence: float = 0.55) -> Veri
     for item in report.evidence:
         src = (item.source or "").strip().lower()
         # 列表类证据：有成功 list 工具路径即可，不做单 ID hash 强校验
-        if src in {"query_orders", "order_list", "list"} or item.id in {"*", "list", "page"}:
-            if not list_ok and not _live_record("order_id", item.id):
-                # 无 list 命令时仍尝试按 order_id 复核
+        if is_list_evidence_source(src) or item.id in {"*", "list", "page"}:
+            if not list_ok and not fetch_live_record("order_id", item.id):
                 if src in {"order", "order_id"}:
                     pass
                 else:
                     continue
             if list_ok:
                 continue
-        live = _live_record(item.source, item.id)
+        live = fetch_live_record(item.source, item.id)
         if live is None:
             issues.append(f"无法复核证据 {item.source}:{item.id}")
             continue

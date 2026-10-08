@@ -21,9 +21,6 @@ EVENTS_STREAM = "oa:task:{task_id}:events"
 CONTROL_STREAM = "oa:task:{task_id}:control"
 META_KEY = "oa:task:{task_id}:meta"
 HITL_KEY = "oa:conv:{cid}:hitl"
-GROUP_ORDER = "order-workers"
-GROUP_LOGISTICS = "logistics-workers"
-GROUP_INVOICE = "invoice-workers"
 
 
 def dispatch_stream(expert: str) -> str:
@@ -39,11 +36,9 @@ def control_stream(task_id: str) -> str:
 
 
 def worker_group(expert: str) -> str:
-    if expert == "order":
-        return GROUP_ORDER
-    if expert == "logistics":
-        return GROUP_LOGISTICS
-    return GROUP_INVOICE
+    """专家 consumer group：{expert}-workers，不再写死三专家分支。"""
+    name = (expert or "expert").strip() or "expert"
+    return f"{name}-workers"
 
 
 class TaskBus(Protocol):

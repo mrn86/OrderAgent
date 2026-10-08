@@ -32,9 +32,9 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
 
+from app.core.agent.domain_registry import apply_result_view, has_result_view, result_view_tool_names
 from app.core.agent.graph_runtime import OrderAgentState, read_hitl_interrupt
 from app.core.agent.tools.governance import Effect
-from app.core.agent.tools.registry import slim_invoice_for_agent
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -510,6 +510,9 @@ def _transform_kept(
     all_messages: Sequence[AnyMessage],
 ) -> list[AnyMessage]:
     """最近 K 轮内部仍可瘦身：最新 list 留 id/status；更早同名 list 改占位；错误缩短。"""
+    from app.domains.ecommerce import ensure_ecommerce_domain
+
+    ensure_ecommerce_domain()
     settings = get_settings()
     max_chars = settings.context_tool_result_max_chars
     last_list_idx: dict[str, int] = {}
@@ -538,9 +541,9 @@ def _transform_kept(
         if isinstance(data, dict) and _is_error_payload(data):
             out.append(replace_tool_content(msg, short_error(data)))
             continue
-        if name == "get_invoice" and isinstance(data, dict):
-            # 旧线程可能仍含 email /「已发送邮箱」；送模前再剥一次
-            slim = slim_invoice_for_agent(data)
+        if name and has_result_view(name) and isinstance(data, dict):
+            # 域注册的送模视图（如发票脱敏）；旧线程也可能仍含敏感字段
+            slim = apply_result_view(name, data)
             out.append(replace_tool_content(msg, json.dumps(slim, ensure_ascii=False)))
             continue
         if isinstance(data, dict) and _is_list_payload(data) and name:
@@ -828,17 +831,24 @@ class ContextCompressionMiddleware(AgentMiddleware[OrderAgentState]):
 
 
 def _strip_invoice_email_tool_messages(messages: list[AnyMessage]) -> list[AnyMessage]:
-    """无论是否压缩，历史 get_invoice 结果送模前剥离 email / 发信进度。"""
+    """无论是否压缩，对已注册 result_view 的工具结果再跑一遍送模视图。"""
+    from app.domains.ecommerce import ensure_ecommerce_domain
+
+    ensure_ecommerce_domain()
+    views = result_view_tool_names()
+    if not views:
+        return list(messages)
     out: list[AnyMessage] = []
     for msg in messages:
-        if not isinstance(msg, ToolMessage) or _tool_name(msg) != "get_invoice":
+        name = _tool_name(msg) if isinstance(msg, ToolMessage) else ""
+        if not isinstance(msg, ToolMessage) or name not in views:
             out.append(msg)
             continue
         data = _parse_json(_text(msg.content))
         if not isinstance(data, dict):
             out.append(msg)
             continue
-        slim = slim_invoice_for_agent(data)
+        slim = apply_result_view(name, data)
         out.append(replace_tool_content(msg, json.dumps(slim, ensure_ascii=False)))
     return out
 

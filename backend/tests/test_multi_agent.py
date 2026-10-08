@@ -46,6 +46,8 @@ def test_profiles_split_tools():
     assert "query_orders" in order
     assert "get_logistics_tracking" not in order
     assert "get_logistics_tracking" in logistics
+    assert "get_order_by_no" not in logistics
+    assert "get_order_detail" not in logistics
     assert "create_refund" not in logistics
     assert "get_invoice" not in order
     assert "get_invoice" in invoice
